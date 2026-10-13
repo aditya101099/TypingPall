@@ -1,0 +1,747 @@
+Architectural Diagnosis: Top 3 Bottlenecks & Code Smells
+1. The SwiftUI–AppKit Responder Loop on the Hot Keystroke Path
+Binding TextKit2TypingEditor directly to a @Published property (typedText / editorText) inside a monolithic ObservableObject forces every single keystroke through a high-overhead cycle:
+ * NSTextView processes keyDown and mutates NSTextContentStorage.
+ * Delegate fires, writing back to the @Published binding on TypingScreenViewModel.
+ * objectWillChange.send() broadcasts to the entire TypingScreenView hierarchy (ReferenceCodeView, PracticeInputPanel, status chips, progress bars).
+ * SwiftUI diffs the view tree and calls updateNSView(_:context:) back on TextKit2TypingEditor.
+ * If updateNSView does not strictly guard against re-entrancy or active Input Method Editor (IME) marked text (hasMarkedText()), it resets NSTextContentStorage attributes or moves the cursor mid-composition—causing frame drops, dead-key bugs, and unnecessary layout invalidations.
+2. The "God Object" ViewModel & Implicit State Permutations
+TypingScreenViewModel (~330 lines, 20+ @Published properties) conflates four orthogonal responsibilities:
+ * Text Buffer & Cursor State: editorText, revealedLength, practicePosition
+ * Domain Mode Logic: .copy, .keyLines, .recall, bugHunt: BugHunt?, contrast: ContrastPair?
+ * Session Persistence & Telemetry: Core Data saves, TypingStatistics, selfRating
+ * User Preferences: textViewFontSize, sessionTabSpaces
+Because drill modes are represented as optional sibling properties (bugHunt?, contrast?) alongside an enum mode, the state space contains impossible states (e.g., mode == .recall while bugHunt != nil). Every @Published mutation invalidates every observer, even if only the current character index changed.
+3. Naive Grapheme-to-UTF16 Diffing & Rigid Whitespace Coupling
+LineDiff.swift iterates via String.Iterator (Extended Grapheme Clusters), normalizes Unicode, and converts indices to UTF-16 NSRange offsets on every keystroke.
+ * Algorithmic overhead: Repeatedly calling unicodeScalars normalization and NSRange(_:in:) inside the keystroke loop allocates intermediate strings and traverses from startIndex (O(N) per call).
+ * Rigid syntactic matching: Comparing characters linearly treats structural trivia (extra spaces around operators like int a=0; vs int a = 0;) identically to semantic errors. Furthermore, skipping leading whitespace works for single-line indentation, but breaks down on inline comments, trailing whitespace, or language-specific token boundaries.
+Domain-by-Domain Engineering Review
+1. Swift Concurrency & Modern Swift Evolution
+Swift 6 Strict Concurrency (-strict-concurrency=complete)
+ * @MainActor Isolation: TypingScreenViewModel, TextKit2TypingView, and NSApplicationDelegate are inherently UI-bound. Annotate TypingScreenViewModel and TextKit2TypingEditor.Coordinator explicitly with @MainActor.
+ * Value-Type Domain Models: Ensure PracticeLesson, PracticeLine, LineDiff, BugHunt, ContrastPair, and RecognitionDrill conform explicitly to Sendable. Because they are immutable structs containing value types, this is zero-cost and allows background parsing/validation of lessons without actor hopping.
+ * Core Data Sendability: NSManagedObject is not Sendable. Never pass NSManagedObject instances across actor boundaries into SwiftUI views or view models. Instead, map Core Data entities into Sendable domain value types (HistoryRecordDTO, CustomLessonDTO) inside viewContext.perform or newBackgroundContext().perform.
+Swift @Observable vs. ObservableObject (Target OS Tradeoff)
+Architectural Constraint: Your target OS is macOS 12.0+, whereas the Swift Observation framework (@Observable) requires macOS 14.0 (Sonoma) at runtime because it links against the OS runtime's observation metadata.
+ * Option A (Recommended for OSS Developer Tooling): Bump deployment target to macOS 14.0+. Over 92% of active macOS developers run macOS 14 or 15+. Adopting @Observable eliminates objectWillChange broadcast storms—SwiftUI tracks field-level access per view body, meaning typing a character only invalidates the cursor/status view, never ReferenceCodeView unless lineIndex advances.
+ * Option B (Keep macOS 12.0+): Split TypingScreenViewModel into granular, narrow ObservableObject sub-controllers (EditorBufferState, LessonSessionController, EditorSettingsStore) so keystroke mutations in EditorBufferState only re-render PracticeInputPanel.
+Core Data vs. SwiftData
+Verdict: Retain Core Data, wrapped in a Sendable Repository Actor.
+SwiftData requires macOS 14+, lacks mature schema migration debugging compared to Core Data, and couples persistence models directly to SwiftUI view lifecycles via @Query. Your current PersistenceController already supports clean in-memory testing (/dev/null store description). Wrap NSPersistentContainer in a dedicated PersistenceRepository actor that exposes async/await methods returning plain Sendable structs.
+2. TextKit 2 Engine & Input Pipeline Optimization
+IME & International Input Handling
+When a user types an accented character (e.g., Option + e, then e -> é) or uses a CJK IME, AppKit enters a marked text composition session via NSTextInputClient.
+ * During composition, textView.hasMarkedText() is true.
+ * Rule: Never run LineDiff, auto-advance lines, or overwrite NSTextContentStorage attributes inside textDidChange(_:) while textView.hasMarkedText() is true. Wait until unmarkText() completes and hasMarkedText() returns false.
+Achieving a Sub-8ms Keystroke Latency Budget (120Hz ProMotion)
+To stay well under the 8.33ms frame budget on ProMotion displays:
+ * Bypass SwiftUI on the Keystroke Path: Do not bind typedText: Binding<String> back to SwiftUI on every keystroke. Keep the source of truth for the currently active line buffer inside TextKit2TypingView / Coordinator.
+ * Apply Error Highlighting via TextKit 2 Rendering Attributes: In TextKit 2, modifying NSTextContentStorage attributes directly invalidates the entire paragraph layout and forces glyph regeneration. Instead, use NSTextLayoutManager.setRenderingAttributes(_:for:) (macOS 12+). Rendering attributes are ephemeral visual overrides (foreground color, background red tint, underline) applied during drawing without mutating NSTextStorage or re-running layout!
+ * Emit High-Level Domain Events Only: The AppKit view only notifies the ViewModel via closures/callbacks on semantic transitions: .progressUpdated(matchedCount: Int, errorRange: NSRange?), .lineCompleted, or .escapePressed.
+Consolidating the 4 Editor Views
+Retire ModernTypingEditor.swift and TypingEditor.swift immediately. Keep a strict 2-file boundary in Views/Editor/:
+ * TextKit2TypingView.swift: Pure AppKit NSView subclass owning the TextKit 2 stack (NSTextContentStorage, NSTextLayoutManager, NSTextContainer, NSTextView). Zero SwiftUI imports—making it directly unit-testable in XCTest / Swift Testing without hosting a SwiftUI view hierarchy.
+ * TextKit2TypingEditor.swift: Lightweight NSViewRepresentable adapter (~60 lines) bridging configuration and semantic callbacks to SwiftUI.
+3. Syntax-Aware Diffing & Tokenization
+Lightweight Native Lexer vs. Tree-sitter
+Bundling Tree-sitter and 13 language C-grammars adds ~15–25MB to the binary and complicates universal (arm64 + x86_64) build scripts. You don't need a full AST to fix whitespace/formatting friction—you need a Zero-Allocation Trivia-Normalizing Scanner.
+Every line of code across your 13 languages consists of four lexical categories:
+ * String/Char Literals ("...", '...'): Exact whitespace inside quotes matters ("hello  world" \neq "hello world").
+ * Identifiers & Keywords ([a-zA-Z0-9_]): Whitespace separating two identifiers is mandatory (int left \neq intleft).
+ * Operators & Punctuation (=, +, ==, ;, (, )): Whitespace between an identifier and punctuation is optional trivia (int left=0; \equiv int left = 0;).
+ * Comments (//, #, /*): Skippable based on skipComments.
+By scanning UTF-8 bytes or Unicode scalars into lightweight token spans before diffing, you can support two comparison modes:
+ * Strict Character Mode: Exact match (current behavior, with pre-normalized NFC strings).
+ * Relaxed Token Mode: Collapses non-semantic horizontal whitespace around punctuation/operators while enforcing exact matches inside string literals and between adjacent identifiers.
+4. State Architecture & Domain State Machine Decoupling
+Replace the 20+ @Published property bag in TypingScreenViewModel with an explicit, hierarchical Sum-Type State Machine.
+ * Mutually Exclusive Drill Modes: Model .standardPractice, .bugHunt, .contrast, and .recognition as an enum with associated values. It becomes a compile-time error to access bugHunt state while in .standardPractice.
+ * Pure Reducer Function: Extract state transitions (handleKeystroke, advanceLine, submitBugLine, toggleMode) into a pure, deterministic reduce(state: inout SessionState, action: SessionAction) -> Effect method. Unit tests can now verify every mode transition in microseconds without instantiating AppKit views or UserDefaults.
+5. Testability, Quality Assurance & Property-Based Testing
+Property-Based / Fuzz Testing for LineDiff
+Use Swift's native Testing framework (import Testing) combined with deterministic pseudo-random Unicode generators (SplitMix64 RNG seeded in tests) to test invariants across 10,000 generated inputs:
+ * Invariant 1 (Range Safety): For any arbitrary expected: String and typed: String containing emojis, ZWJ sequences (👨‍👩‍👧‍👦), combining marks (e\u{301}), and CJK characters, the returned errorUTF16Range must always verify NSMaxRange(range) <= (typed as NSString).length.
+ * Invariant 2 (NFC/NFD Equivalence): LineDiff.compare(expected: s.precomposedStringWithCanonicalMapping, typed: s.decomposedStringWithCanonicalMapping) must always yield .exactMatch.
+ * Invariant 3 (Prefix Monotonicity): If typed is a valid prefix of expected, firstMismatch must be nil and isComplete must be typed == expected.
+Headless Visual Snapshot Testing on macOS
+Avoid third-party frameworks if maintaining zero runtime dependencies: write a lightweight 40-line NSView.snapshotImage() helper in TypingPallTests using view.bitmapImageRepForCachingDisplay(in: view.bounds) and view.cacheDisplay(in: view.bounds, to: rep). Pin the color space to NSColorSpace.sRGB and force view.appearance = NSAppearance(named: .darkAqua) so snapshots are deterministic across developer laptops and GitHub Actions headless runners.
+6. Developer Experience, CI/CD & Build Tooling
+Optimizing scripts/check.sh & check_lessons.py
+ * Content-Addressable Caching in check_lessons.py: Compiling hundreds of C++, Rust, and Go snippets on every commit takes minutes. Compute a SHA-256 hash of (compiler_version, snippet_code, compiler_flags) and store verified hashes in .cache/lesson_hashes.json. Only invoke rustc/g++ on modified or uncached lessons—cutting check_lessons.py runtimes from minutes to < 150ms.
+ * Parallel xcodebuild with DerivedData Caching: Ensure check.sh passes -parallel-testing-enabled YES and -maximum-concurrent-test-simulator-destinations (or concurrent macOS test workers) with -resultBundlePath build/TestResults.xcresult.
+Refactored Code Prototypes
+Prototype 1: Modernized @Observable State Machine (TypingScreenViewModel.swift)
+This implementation isolates mutually exclusive drill modes into an enum-driven state machine, separates persisted preferences from volatile keystroke state, and guarantees @MainActor safety for Swift 6.
+import Foundation
+import Observation
+
+// MARK: - Domain State Definitions
+
+public enum PracticeSubMode: String, Sendable, CaseIterable {
+    case copy       // Live reference visible, immediate error highlighting
+    case keyLines   // Reference partially masked
+    case recall     // Reference hidden until Return is pressed
+}
+
+public enum DrillPhase: Sendable, Equatable {
+    case typing(subMode: PracticeSubMode, currentLineIndex: Int, lineProgress: LineProgress)
+    case bugHunt(BugHuntState)
+    case contrast(ContrastState)
+    case recognition(RecognitionState)
+    case completed(SessionReport)
+}
+
+public struct LineProgress: Sendable, Equatable {
+    public var matchedCount: Int = 0
+    public var errorUTF16Range: NSRange? = nil
+    public var isLineComplete: Bool = false
+    public var isRevealedByReturn: Bool = false
+}
+
+public struct BugHuntState: Sendable, Equatable {
+    public let plantedLineIndex: Int
+    public var selectedLineIndex: Int?
+    public var attemptsRemaining: Int
+    public var isResolved: Bool
+}
+
+public struct ContrastState: Sendable, Equatable {
+    public let variantALines: [String]
+    public let variantBLines: [String]
+    public var currentDiffIndex: Int
+}
+
+public struct RecognitionState: Sendable, Equatable {
+    public let promptScenario: String
+    public let options: [String]
+    public let correctIndex: Int
+    public var selectedOption: Int?
+}
+
+public struct SessionReport: Sendable, Equatable {
+    public let totalLines: Int
+    public let cleanLines: Int
+    public let durationSeconds: TimeInterval
+    public var selfRating: Int?
+}
+
+// MARK: - Unidirectional Actions
+
+public enum PracticeAction: Sendable {
+    case editorProgressChanged(matchedCount: Int, errorRange: NSRange?, isComplete: Bool)
+    case commitLineOnReturn
+    case selectSubMode(PracticeSubMode)
+    case selectBugLine(Int)
+    case rateSession(Int)
+    case restartLesson
+}
+
+// MARK: - ViewModel (@Observable + Swift 6 @MainActor)
+
+@MainActor
+@Observable
+public final class TypingScreenViewModel {
+    // Immutable Lesson Context
+    public let lesson: PracticeLesson
+    public private(set) var executableLines: [PracticeLine]
+    
+    // Single Source of Truth for Drill Mode & Progress
+    public private(set) var phase: DrillPhase
+    
+    // Command Signal to Imperative AppKit View (Incremented when text buffer must clear)
+    public private(set) var bufferResetToken: UInt64 = 0
+    
+    private var cleanLineCount: Int = 0
+    private var currentLineHadError: Bool = false
+    private let sessionStartTime: ContinuousClock.Instant = .now
+
+    public init(lesson: PracticeLesson, skipComments: Bool = true, initialSubMode: PracticeSubMode = .copy) {
+        self.lesson = lesson
+        let filtered = lesson.lines.filter { !skipComments || !$0.isComment }
+        self.executableLines = filtered
+        self.phase = filtered.isEmpty
+            ? .completed(SessionReport(totalLines: 0, cleanLines: 0, durationSeconds: 0))
+            : .typing(subMode: initialSubMode, currentLineIndex: 0, lineProgress: LineProgress())
+    }
+
+    public var currentTargetLine: String? {
+        guard case let .typing(_, index, _) = phase,
+              executableLines.indices.contains(index) else { return nil }
+        return executableLines[index].trimmedSemanticContent
+    }
+
+    // MARK: - Deterministic State Reducer
+
+    public func send(_ action: PracticeAction) {
+        switch (phase, action) {
+        case (var .typing(subMode, lineIndex, progress), let .editorProgressChanged(matched, errorRange, isComplete)):
+            progress.matchedCount = matched
+            progress.errorUTF16Range = errorRange
+            progress.isLineComplete = isComplete
+            if errorRange != nil {
+                currentLineHadError = true
+            }
+            self.phase = .typing(subMode: subMode, currentLineIndex: lineIndex, lineProgress: progress)
+
+        case (var .typing(subMode, lineIndex, progress), .commitLineOnReturn):
+            // In .recall mode, first Return reveals the line if not yet complete
+            if subMode == .recall && !progress.isLineComplete && !progress.isRevealedByReturn {
+                progress.isRevealedByReturn = true
+                self.phase = .typing(subMode: subMode, currentLineIndex: lineIndex, lineProgress: progress)
+                return
+            }
+            guard progress.isLineComplete else { return }
+            advanceToNextLine(from: lineIndex, subMode: subMode)
+
+        case (let .typing(_, lineIndex, progress), let .selectSubMode(newSubMode)):
+            self.phase = .typing(subMode: newSubMode, currentLineIndex: lineIndex, lineProgress: progress)
+
+        case (var .bugHunt(state), let .selectBugLine(selectedLine)):
+            guard !state.isResolved && state.attemptsRemaining > 0 else { return }
+            state.selectedLineIndex = selectedLine
+            if selectedLine == state.plantedLineIndex {
+                state.isResolved = true
+            } else {
+                state.attemptsRemaining -= 1
+            }
+            self.phase = .bugHunt(state)
+
+        case (var .completed(report), let .rateSession(rating)):
+            report.selfRating = rating
+            self.phase = .completed(report)
+
+        case (_, .restartLesson):
+            cleanLineCount = 0
+            currentLineHadError = false
+            bufferResetToken &+= 1
+            self.phase = .typing(subMode: .copy, currentLineIndex: 0, lineProgress: LineProgress())
+
+        default:
+            break
+        }
+    }
+
+    private func advanceToNextLine(from index: Int, subMode: PracticeSubMode) {
+        if !currentLineHadError { cleanLineCount += 1 }
+        currentLineHadError = false
+        bufferResetToken &+= 1
+
+        let nextIndex = index + 1
+        if nextIndex < executableLines.count {
+            self.phase = .typing(subMode: subMode, currentLineIndex: nextIndex, lineProgress: LineProgress())
+        } else {
+            let elapsed = ContinuousClock.now - sessionStartTime
+            let seconds = Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) / 1e18
+            self.phase = .completed(SessionReport(
+                totalLines: executableLines.count,
+                cleanLines: cleanLineCount,
+                durationSeconds: seconds,
+                selfRating: nil
+            ))
+        }
+    }
+}
+
+Prototype 2: Pre-Indexed, Token-Aware LineDiff Engine (LineDiff.swift)
+Instead of re-normalizing the target string and walking from startIndex on every keystroke, PreparedTargetLine pre-computes NFC normalization and syntax-aware whitespace rules once when a line becomes active. Keystroke evaluation becomes zero-allocation and O(N) in UTF-16 code units.
+import Foundation
+
+public enum DiffTolerance: Sendable {
+    /// Strict character-for-character matching (after NFC normalization and leading indent strip).
+    case strictCharacter
+    /// Collapses redundant horizontal spaces around punctuation/operators while preserving string literals.
+    case syntaxAwareTrivia
+}
+
+public struct DiffResult: Sendable, Equatable {
+    /// Number of valid prefix characters matched in the target line.
+    public let matchedTargetCharacters: Int
+    /// Exact UTF-16 NSRange in the user's `typed` string where the mismatch begins (for TextKit 2 attributes).
+    public let errorUTF16Range: NSRange?
+    /// True when the user's input satisfies the entire target line.
+    public let isComplete: Bool
+}
+
+/// Pre-computed representation of the target line, initialized ONCE per line advance.
+public struct PreparedTargetLine: Sendable {
+    public let rawLine: String
+    public let semanticTarget: String
+    public let leadingIndentUTF16Count: Int
+
+    public init(rawLine: String) {
+        self.rawLine = rawLine
+        // Strip leading indentation and trailing whitespace, normalized to NFC
+        let trimmedStart = rawLine.drop(while: { $0 == " " || $0 == "\t" })
+        self.leadingIndentUTF16Count = rawLine.utf16.count - trimmedStart.utf16.count
+        
+        var trimmedEnd = Substring(trimmedStart)
+        while let last = trimmedEnd.last, last == " " || last == "\t" {
+            trimmedEnd = trimmedEnd.dropLast()
+        }
+        self.semanticTarget = String(trimmedEnd).precomposedStringWithCanonicalMapping
+    }
+}
+
+public enum LineDiff {
+    /// Evaluates user input against a pre-computed target line.
+    public static func evaluate(
+        target: PreparedTargetLine,
+        typed: String,
+        tolerance: DiffTolerance = .strictCharacter
+    ) -> DiffResult {
+        // Fast path for empty input
+        if typed.isEmpty {
+            return DiffResult(
+                matchedTargetCharacters: 0,
+                errorUTF16Range: nil,
+                isComplete: target.semanticTarget.isEmpty
+            )
+        }
+
+        let normalizedTyped = typed.precomposedStringWithCanonicalMapping
+        let expectedStr: String
+        let effectiveTyped: String
+
+        switch tolerance {
+        case .strictCharacter:
+            expectedStr = target.semanticTarget
+            effectiveTyped = normalizedTyped
+        case .syntaxAwareTrivia:
+            expectedStr = normalizeCodeTrivia(target.semanticTarget)
+            effectiveTyped = normalizeCodeTrivia(normalizedTyped)
+        }
+
+        // Single-pass simultaneous traversal tracking exact UTF-16 offsets in the original `typed` string
+        var expIter = expectedStr.makeIterator()
+        var typedIdx = typed.startIndex
+        var matchedCount = 0
+
+        while typedIdx < typed.endIndex {
+            let rawTypedChar = typed[typedIdx]
+            // Normalize single extended grapheme cluster only when contains non-ASCII
+            let typedChar: Character = rawTypedChar.isASCII
+                ? rawTypedChar
+                : String(rawTypedChar).precomposedStringWithCanonicalMapping.first ?? rawTypedChar
+
+            guard let expChar = expIter.next() else {
+                // User typed extra characters beyond the end of the expected line
+                let mismatchRange = NSRange(typedIdx..<typed.endIndex, in: typed)
+                return DiffResult(
+                    matchedTargetCharacters: matchedCount,
+                    errorUTF16Range: mismatchRange,
+                    isComplete: false
+                )
+            }
+
+            if typedChar != expChar {
+                // If syntaxAwareTrivia is enabled, verify via normalized stream before flagging
+                if tolerance == .syntaxAwareTrivia, effectiveTyped == expectedStr {
+                    return DiffResult(
+                        matchedTargetCharacters: expectedStr.count,
+                        errorUTF16Range: nil,
+                        isComplete: true
+                    )
+                }
+                let mismatchRange = NSRange(typedIdx..<typed.endIndex, in: typed)
+                return DiffResult(
+                    matchedTargetCharacters: matchedCount,
+                    errorUTF16Range: mismatchRange,
+                    isComplete: false
+                )
+            }
+
+            matchedCount += 1
+            typed.formIndex(after: &typedIdx)
+        }
+
+        let isComplete = (expIter.next() == nil)
+        return DiffResult(
+            matchedTargetCharacters: matchedCount,
+            errorUTF16Range: nil,
+            isComplete: isComplete
+        )
+    }
+
+    /// Lightweight lexical normalizer: preserves exact spacing inside string literals,
+    /// requires 1 space between adjacent identifiers (`int a`), and strips optional spaces around operators (`a=1` == `a = 1`).
+    public static func normalizeCodeTrivia(_ input: String) -> String {
+        var result = String()
+        result.reserveCapacity(input.utf8.count)
+
+        var inSingleQuote = false
+        var inDoubleQuote = false
+        var isEscaped = false
+        var pendingSpace = false
+        var lastSignificantChar: Character?
+
+        for ch in input {
+            if isEscaped {
+                result.append(ch)
+                isEscaped = false
+                continue
+            }
+            if ch == "\\" && (inSingleQuote || inDoubleQuote) {
+                result.append(ch)
+                isEscaped = true
+                continue
+            }
+            if ch == "\"" && !inSingleQuote {
+                if pendingSpace, let last = lastSignificantChar, isIdentifierChar(last) {
+                    // Drop space before quote unless needed
+                }
+                pendingSpace = false
+                inDoubleQuote.toggle()
+                result.append(ch)
+                lastSignificantChar = ch
+                continue
+            }
+            if ch == "'" && !inDoubleQuote {
+                pendingSpace = false
+                inSingleQuote.toggle()
+                result.append(ch)
+                lastSignificantChar = ch
+                continue
+            }
+
+            if inSingleQuote || inDoubleQuote {
+                result.append(ch)
+                continue
+            }
+
+            // Outside string literals: collapse horizontal whitespace
+            if ch == " " || ch == "\t" {
+                pendingSpace = true
+                continue
+            }
+
+            if pendingSpace {
+                if let prev = lastSignificantChar, isIdentifierChar(prev) && isIdentifierChar(ch) {
+                    result.append(" ")
+                }
+                pendingSpace = false
+            }
+
+            result.append(ch)
+            lastSignificantChar = ch
+        }
+        return result
+    }
+
+    @inline(__always)
+    private static func isIdentifierChar(_ c: Character) -> Bool {
+        c.isLetter || c.isNumber || c == "_" || c == "$"
+    }
+}
+
+Prototype 3: IME-Safe, Zero-Layout-Invalidation TextKit 2 Input Engine (TextKit2TypingView.swift)
+This implementation solves the two hardest problems in AppKit TextKit 2 editors:
+ * IME Safety: Checks textView.hasMarkedText() before running diff logic so dead keys (Option+e) and CJK composition never glitch or prematurely trigger errors.
+ * Zero-Cost Error Highlighting: Uses TextKit 2's NSTextLayoutManager.setRenderingAttributes(_:for:) instead of mutating NSTextContentStorage—painting error states directly in the layout fragment pass without dirtying paragraph layout or resetting typing attributes.
+import AppKit
+
+@MainActor
+public protocol TextKit2TypingViewDelegate: AnyObject {
+    func typingView(_ view: TextKit2TypingView, didUpdateProgress result: DiffResult)
+    func typingViewDidPressReturn(_ view: TextKit2TypingView)
+}
+
+@MainActor
+public final class TextKit2TypingView: NSView, NSTextViewDelegate {
+    public weak var delegate: TextKit2TypingViewDelegate?
+
+    private let textContentStorage = NSTextContentStorage()
+    private let textLayoutManager = NSTextLayoutManager()
+    private let textContainer: NSTextContainer
+    public let textView: NSTextView
+
+    private var preparedTarget = PreparedTargetLine(rawLine: "")
+    private var lastAppliedBufferResetToken: UInt64 = 0
+    public var diffTolerance: DiffTolerance = .strictCharacter
+
+    public override init(frame frameRect: NSRect) {
+        self.textContainer = NSTextContainer(size: NSSize(width: frameRect.width, height: .greatestFiniteMagnitude))
+        self.textContainer.widthTracksTextView = true
+
+        self.textLayoutManager.textContainer = textContainer
+        self.textContentStorage.addTextLayoutManager(textLayoutManager)
+
+        self.textView = NSTextView(frame: frameRect, textContainer: textContainer)
+        super.init(frame: frameRect)
+        setupTextView()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    private func setupTextView() {
+        textView.delegate = self
+        textView.isRichText = false
+        textView.isAutomaticQuoteSubstitutionEnabled = false
+        textView.isAutomaticDashSubstitutionEnabled = false
+        textView.isAutomaticTextReplacementEnabled = false
+        textView.isAutomaticSpellingCorrectionEnabled = false
+        textView.isContinuousSpellCheckingEnabled = false
+        textView.drawsBackground = false
+        textView.font = NSFont.monospacedSystemFont(ofSize: 15, weight: .regular)
+        textView.textColor = .labelColor
+
+        textView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(textView)
+        NSLayoutConstraint.activate([
+            textView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            textView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            textView.topAnchor.constraint(equalTo: topAnchor),
+            textView.bottomAnchor.constraint(equalTo: bottomAnchor)
+        ])
+    }
+
+    // MARK: - External State Synchronization (Called by NSViewRepresentable)
+
+    public func configure(targetLine: String, resetToken: UInt64, fontSize: CGFloat) {
+        if textView.font?.pointSize != fontSize {
+            textView.font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+        }
+
+        if preparedTarget.rawLine != targetLine {
+            preparedTarget = PreparedTargetLine(rawLine: targetLine)
+        }
+
+        if resetToken != lastAppliedBufferResetToken {
+            lastAppliedBufferResetToken = resetToken
+            // Never clobber an active IME session
+            if textView.hasMarkedText() {
+                textView.unmarkText()
+            }
+            textView.string = ""
+            clearRenderingAttributes()
+        }
+    }
+
+    // MARK: - NSTextViewDelegate (Hot Keystroke Path)
+
+    public func textDidChange(_ notification: Notification) {
+        // CRITICAL: Do not evaluate diffs or mutate rendering attributes while IME composition is active
+        guard !textView.hasMarkedText() else { return }
+
+        let currentString = textView.string
+        let result = LineDiff.evaluate(
+            target: preparedTarget,
+            typed: currentString,
+            tolerance: diffTolerance
+        )
+
+        applyErrorRenderingAttributes(errorRange: result.errorUTF16Range)
+        delegate?.typingView(self, didUpdateProgress: result)
+    }
+
+    public func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        // Intercept Return / Enter key without inserting a newline character
+        if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+            guard !textView.hasMarkedText() else { return false }
+            delegate?.typingViewDidPressReturn(self)
+            return true
+        }
+        return false
+    }
+
+    // MARK: - TextKit 2 Rendering Attributes (Zero Layout Re-Computation)
+
+    private func clearRenderingAttributes() {
+        let documentRange = textLayoutManager.documentRange
+        guard !documentRange.isEmpty else { return }
+        textLayoutManager.setRenderingAttributes([:], for: documentRange)
+        textView.needsDisplay = true
+    }
+
+    private func applyErrorRenderingAttributes(errorRange: NSRange?) {
+        let documentRange = textLayoutManager.documentRange
+        guard !documentRange.isEmpty else { return }
+
+        // 1. Reset existing rendering attributes across the single-line document
+        textLayoutManager.setRenderingAttributes([:], for: documentRange)
+
+        // 2. If a mismatch exists, convert UTF-16 NSRange -> NSTextRange and apply ephemeral red tint
+        if let nsErrorRange = errorRange,
+           nsErrorRange.length > 0,
+           let textRange = makeTextRange(from: nsErrorRange) {
+            let errorAttributes: [NSAttributedString.Key: Any] = [
+                .foregroundColor: NSColor.systemRed,
+                .backgroundColor: NSColor.systemRed.withAlphaComponent(0.18),
+                .underlineStyle: NSUnderlineStyle.single.rawValue,
+                .underlineColor: NSColor.systemRed
+            ]
+            textLayoutManager.setRenderingAttributes(errorAttributes, for: textRange)
+        }
+
+        textView.needsDisplay = true
+    }
+
+    private func makeTextRange(from nsRange: NSRange) -> NSTextRange? {
+        let docStart = textContentStorage.documentRange.location
+        guard let startLoc = textContentStorage.location(docStart, offsetBy: nsRange.location),
+              let endLoc = textContentStorage.location(startLoc, offsetBy: nsRange.length) else {
+            return nil
+        }
+        return NSTextRange(location: startLoc, end: endLoc)
+    }
+}
+
+Prototype 4: Swift Testing Property-Based Suite for LineDiff (LineDiffTests.swift)
+Using Xcode 16's native Testing framework (@Test, #expect), this suite verifies UTF-16 bounds safety and Unicode canonical equivalence across tricky grapheme clusters.
+import Foundation
+import Testing
+@testable import TypingPall
+
+@Suite("LineDiff Engine & UTF-16 Boundary Verification")
+struct LineDiffTests {
+
+    @Test("Canonical Unicode equivalence (NFC vs NFD) matches without error",
+          arguments: [
+            ("let café = 1", "let cafe\u{301} = 1"),
+            ("const naïve = true;", "const nai\u{308}ve = true;"),
+            ("// résumé", "// re\u{301}sume\u{301}")
+          ])
+    func unicodeCanonicalEquivalence(expected: String, typed: String) {
+        let target = PreparedTargetLine(rawLine: expected)
+        let result = LineDiff.evaluate(target: target, typed: typed, tolerance: .strictCharacter)
+
+        #expect(result.errorUTF16Range == nil)
+        #expect(result.isComplete == true)
+    }
+
+    @Test("Syntax-aware trivia mode ignores optional spaces around operators but preserves string literals")
+    func syntaxAwareTriviaMatching() {
+        let target = PreparedTargetLine(rawLine: "    int left = 0, right = n - 1;")
+        let compactTyped = "int left=0,right=n-1;"
+
+        let strictResult = LineDiff.evaluate(target: target, typed: compactTyped, tolerance: .strictCharacter)
+        #expect(strictResult.errorUTF16Range != nil)
+
+        let relaxedResult = LineDiff.evaluate(target: target, typed: compactTyped, tolerance: .syntaxAwareTrivia)
+        #expect(relaxedResult.errorUTF16Range == nil)
+        #expect(relaxedResult.isComplete == true)
+
+        // Ensure spaces inside string literals are NEVER collapsed
+        let stringTarget = PreparedTargetLine(rawLine: #"print("hello  world")"#)
+        let wrongStringTyped = #"print("hello world")"#
+        let stringResult = LineDiff.evaluate(target: stringTarget, typed: wrongStringTyped, tolerance: .syntaxAwareTrivia)
+        #expect(stringResult.errorUTF16Range != nil)
+    }
+
+    @Test("Property-based fuzzing: errorUTF16Range never exceeds NSString UTF-16 bounds")
+    func fuzzUTF16BoundsSafety() {
+        let fragments = ["func ", "é", "e\u{301}", "👨‍👩‍👧‍👦", "🏳️‍🌈", "🚀", "int a = 0;", "漢字", "\u{200B}"]
+        var rng = SystemRandomNumberGenerator()
+
+        for _ in 0..<500 {
+            let expectedRaw = (0..<Int.random(in: 0...8, using: &rng))
+                .map { _ in fragments.randomElement(using: &rng)! }
+                .joined()
+            let typedRaw = (0..<Int.random(in: 0...8, using: &rng))
+                .map { _ in fragments.randomElement(using: &rng)! }
+                .joined()
+
+            let target = PreparedTargetLine(rawLine: expectedRaw)
+            let result = LineDiff.evaluate(target: target, typed: typedRaw)
+
+            if let errorRange = result.errorUTF16Range {
+                let utf16Length = (typedRaw as NSString).length
+                #expect(errorRange.location >= 0)
+                #expect(NSMaxRange(errorRange) <= utf16Length)
+            }
+        }
+    }
+}
+
+CI/CD & Automated Notarization Pipeline
+1. Fast Incremental Lesson Verification (scripts/check_lessons.py Upgrade)
+Add a SHA-256 content cache to scripts/check_lessons.py so unchanged code snippets aren't recompiled by rustc/g++ on every test run:
+import hashlib
+import json
+from pathlib import Path
+
+CACHE_FILE = Path(".build_cache/verified_lessons.json")
+
+def load_cache() -> dict[str, str]:
+    if CACHE_FILE.exists():
+        return json.loads(CACHE_FILE.read_text())
+    return {}
+
+def save_cache(cache: dict[str, str]) -> None:
+    CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    CACHE_FILE.write_text(json.dumps(cache, indent=2, sort_keys=True))
+
+def snippet_digest(language: str, toolchain_version: str, code: str) -> str:
+    payload = f"{language}:{toolchain_version}:{code}".encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+2. Zero-Credential-Leak GitHub Actions Signing & Notarization
+To sign and notarize Universal macOS binaries without leaking certificates or Apple ID passwords:
+ * Generate an App Store Connect API Key (.p8 file, KEY_ID, ISSUER_ID).
+ * Base64-encode your Developer ID Application .p12 certificate into GitHub Actions Secrets (BUILD_CERTIFICATE_BASE64, P12_PASSWORD).
+ * Create an ephemeral Keychain in /tmp during the workflow run and destroy it in an if: always() post-step:
+# .github/workflows/release.yml (Key Signing & Notarization Steps)
+- name: Create Ephemeral Keychain & Import Developer ID
+  env:
+    BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+    P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+    KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+  run: |
+    KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+    echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode -o $RUNNER_TEMP/cert.p12
+    security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+    security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+    security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+    security import $RUNNER_TEMP/cert.p12 -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+    security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+    security list-keychain -d user -s "$KEYCHAIN_PATH"
+
+- name: Archive, Sign & Notarize Universal Binary
+  env:
+    ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+    ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+    ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+  run: |
+    echo -n "$ASC_PRIVATE_KEY" > $RUNNER_TEMP/AuthKey.p8
+    xcodebuild archive \
+      -scheme TypingPall \
+      -destination "generic/platform=macOS" \
+      -archivePath $RUNNER_TEMP/TypingPall.xcarchive \
+      ARCHS="arm64 x86_64" \
+      ONLY_ACTIVE_ARCH=NO \
+      OTHER_CODE_SIGN_FLAGS="--timestamp --options=runtime"
+
+    ditto -c -k --keepParent "$RUNNER_TEMP/TypingPall.xcarchive/Products/Applications/TypingPall.app" "$RUNNER_TEMP/TypingPall.zip"
+
+    xcrun notarytool submit "$RUNNER_TEMP/TypingPall.zip" \
+      --key "$RUNNER_TEMP/AuthKey.p8" \
+      --key-id "$ASC_KEY_ID" \
+      --issuer "$ASC_ISSUER_ID" \
+      --wait
+
+    xcrun stapler staple "$RUNNER_TEMP/TypingPall.xcarchive/Products/Applications/TypingPall.app"
+
+- name: Destroy Ephemeral Keychain & Secrets
+  if: always()
+  run: |
+    security delete-keychain $RUNNER_TEMP/app-signing.keychain-db || true
+    rm -f $RUNNER_TEMP/cert.p12 $RUNNER_TEMP/AuthKey.p8
+
+Phased Engineering Roadmap
+| Phase | Scope & Focus | Concrete Engineering Deliverables | Verification Gate |
+|---|---|---|---|
+| Phase 1: Housekeeping & Modernization
+(Days 1–3) | Dead-code removal, Swift 6 concurrency preparation, and build pipeline speedups. | 1. Delete ModernTypingEditor.swift and TypingEditor.swift.
+2. Add Sendable conformance to all structs/enums in Models/.
+3. Annotate TypingScreenViewModel and TextKit2TypingView with @MainActor.
+4. Add SHA-256 snippet caching to scripts/check_lessons.py. | SWIFT_STRICT_CONCURRENCY = complete compiles with 0 warnings. check_lessons.py incremental run finishes in under 1 second. |
+| Phase 2: Core Engine & State Machine Upgrade
+(Weeks 1–2) | Decoupling keystroke latency from SwiftUI and refactoring TypingScreenViewModel. | 1. Replace NSTextContentStorage attribute mutation in TextKit2TypingView with NSTextLayoutManager.setRenderingAttributes(_:for:) and guard on hasMarkedText().
+2. Remove 2-way Binding<String> keystroke feedback loop; use resetToken and semantic delegate callbacks.
+3. Refactor TypingScreenViewModel into the enum-driven DrillPhase state machine. | Instruments Time Profiler shows 0 SwiftUI view body evaluations on ReferenceCodeView during active keystrokes; keystroke handler completes in < 0.4ms. |
+| Phase 3: Advanced Capabilities & Release Automation
+(Weeks 3–4) | Syntax-aware diffing, property-based testing, and automated notarization. | 1. Ship PreparedTargetLine and DiffTolerance.syntaxAwareTrivia in LineDiff.swift.
+2. Migrate LineDiffTests and PracticeScreenTests to Swift Testing (@Test, #expect) with 500-iteration Unicode fuzzing.
+3. Add GitHub Actions ephemeral keychain signing + xcrun notarytool pipeline. | All 13 language tracks pass syntax-aware diff tests; tagged commits automatically publish notarized, stapled Universal .dmg releases. |

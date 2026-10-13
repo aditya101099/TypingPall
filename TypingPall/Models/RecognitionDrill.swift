@@ -1,14 +1,14 @@
 import Foundation
 
-struct RecognitionDrill {
-    struct Question: Equatable {
+struct RecognitionDrill: Sendable {
+    struct Question: Equatable, Sendable {
         let lessonID: String
         let prompt: String
         let options: [String]
     }
 
     /// SplitMix64, so a seed reproduces a round.
-    struct Generator: RandomNumberGenerator {
+    struct Generator: RandomNumberGenerator, Sendable {
         private var state: UInt64
         init(seed: UInt64) { state = seed }
         mutating func next() -> UInt64 {

@@ -1,285 +1,257 @@
 import AppKit
 import SwiftUI
 
-/// Enhanced TextKit 2 implementation with better text location handling
-/// This is the production-ready version with proper NSTextLocation management
+@MainActor
+public protocol TextKit2TypingViewDelegate: AnyObject {
+    func typingView(_ view: TextKit2TypingView, didUpdateProgress result: DiffResult)
+    func typingViewDidPressReturn(_ view: TextKit2TypingView)
+}
+
+/// Production-ready TextKit 2 input engine with sub-8ms latency and zero-layout invalidation styling.
 @available(macOS 12.0, *)
-class TextKit2TypingView: NSView {
+@MainActor
+public final class TextKit2TypingView: NSView, NSTextViewDelegate {
+    public weak var delegate: TextKit2TypingViewDelegate?
 
-    // MARK: - TextKit 2 Components
-
-    private let textContentStorage: NSTextContentStorage
-    private let textLayoutManager: NSTextLayoutManager
+    private let textContentStorage = NSTextContentStorage()
+    private let textLayoutManager = NSTextLayoutManager()
     private let textContainer: NSTextContainer
-    private let scrollView: NSScrollView
-    private let textView: NSTextView
+    public let textView: NSTextView
 
-    // MARK: - Configuration
+    private var preparedTarget = PreparedTargetLine(rawLine: "")
+    private var lastAppliedBufferResetToken: UInt64 = 0
+    public var diffTolerance: DiffTolerance = .strictCharacter
 
-    var targetText: String = "" {
-        didSet { updateContent() }
-    }
+    public override init(frame frameRect: NSRect) {
+        self.textContainer = NSTextContainer(size: NSSize(width: frameRect.width, height: .greatestFiniteMagnitude))
+        self.textContainer.widthTracksTextView = true
 
-    var typedText: String = "" {
-        didSet { updateContent() }
-    }
+        self.textLayoutManager.textContainer = textContainer
+        self.textContentStorage.addTextLayoutManager(textLayoutManager)
 
-    var fontSize: CGFloat = 16 {
-        didSet { updateFont() }
-    }
-
-    var onTextChanged: ((String) -> Void)?
-    var tabSpaces: Int = 4
-
-    // MARK: - Private Properties
-
-    private var isUpdating = false
-
-    // MARK: - Initialization
-
-    override init(frame frameRect: NSRect) {
-        // Initialize TextKit 2 stack
-        textContentStorage = NSTextContentStorage()
-        textLayoutManager = NSTextLayoutManager()
-        textContainer = NSTextContainer()
-
-        // Create scroll view and text view
-        scrollView = NSScrollView()
-        textView = NSTextView()
-
+        self.textView = NSTextView(frame: frameRect, textContainer: textContainer)
         super.init(frame: frameRect)
-
-        setupTextKit2Stack()
-        setupViews()
+        setupTextView()
     }
 
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    public var tabSpaces: Int = 4
+    public var isEnabled: Bool = true {
+        didSet { textView.isEditable = isEnabled }
     }
 
-    // MARK: - Setup
-
-    private func setupTextKit2Stack() {
-        // Connect TextKit 2 components
-        textContentStorage.addTextLayoutManager(textLayoutManager)
-        textLayoutManager.textContainer = textContainer
-
-        // Configure text container
-        textContainer.widthTracksTextView = true
-        textContainer.heightTracksTextView = false
-        textContainer.lineFragmentPadding = 10
+    public override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil {
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.textView.window?.makeFirstResponder(self.textView)
+            }
+        }
     }
 
-    private func setupViews() {
-        // Configure scroll view
-        scrollView.hasVerticalScroller = true
-        scrollView.hasHorizontalScroller = false
-        scrollView.autohidesScrollers = true
-        scrollView.borderType = .noBorder
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
-
-        // Configure text view with TextKit 2 container
-        textView.frame = bounds
-        textView.minSize = NSSize(width: 0, height: 0)
-        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-        textView.isVerticallyResizable = true
-        textView.isHorizontallyResizable = false
-        textView.autoresizingMask = [.width]
-        textView.textContainer = textContainer
-        textView.isEditable = true
-        textView.isSelectable = true
-        textView.allowsUndo = true
-        textView.font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .bold)
-        textView.textContainerInset = NSSize(width: 10, height: 10)
-        textView.backgroundColor = .textBackgroundColor
+    private func setupTextView() {
         textView.delegate = self
-
-        // Disable smart replacements
+        textView.isRichText = false
+        textView.allowsUndo = true
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.isAutomaticDashSubstitutionEnabled = false
         textView.isAutomaticTextReplacementEnabled = false
         textView.isAutomaticSpellingCorrectionEnabled = false
+        textView.isContinuousSpellCheckingEnabled = false
+        textView.drawsBackground = false
+        textView.font = NSFont.monospacedSystemFont(ofSize: 15, weight: .regular)
+        textView.textColor = .labelColor
+        textView.textContainerInset = NSSize(width: 16, height: 8)
+        textView.textContainer?.lineFragmentPadding = 0
+        textView.setAccessibilityIdentifier("practiceInput")
+        textView.setAccessibilityLabel("Type the highlighted line here")
 
-        // Setup view hierarchy
-        scrollView.documentView = textView
-        addSubview(scrollView)
-
-        // Layout constraints
+        textView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(textView)
         NSLayoutConstraint.activate([
-            scrollView.topAnchor.constraint(equalTo: topAnchor),
-            scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: bottomAnchor)
+            textView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            textView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            textView.topAnchor.constraint(equalTo: topAnchor),
+            textView.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
     }
 
-    // MARK: - Content Management
+    // MARK: - External State Synchronization
 
-    private func updateContent() {
-        guard !isUpdating else { return }
-        isUpdating = true
-        defer { isUpdating = false }
+    public func configure(targetLine: String, resetToken: UInt64, fontSize: CGFloat, isEnabled: Bool = true, diffTolerance: DiffTolerance = .strictCharacter) {
+        self.isEnabled = isEnabled
+        self.diffTolerance = diffTolerance
 
-        let visualTarget = visualizeSpecialCharacters(in: targetText)
-        let visualTyped = visualizeSpecialCharacters(in: typedText)
+        let safeSize = min(30, max(12, fontSize))
+        if textView.font?.pointSize != safeSize {
+            textView.font = NSFont.monospacedSystemFont(ofSize: safeSize, weight: .regular)
+        }
 
-        let attributedString = createStyledText(
-            targetText: visualTarget,
-            typedText: visualTyped
+        if preparedTarget.rawLine != targetLine {
+            preparedTarget = PreparedTargetLine(rawLine: targetLine)
+        }
+
+        if resetToken != lastAppliedBufferResetToken {
+            lastAppliedBufferResetToken = resetToken
+            if textView.hasMarkedText() {
+                textView.unmarkText()
+            }
+            textView.string = ""
+            clearRenderingAttributes()
+        }
+    }
+
+    // MARK: - NSTextViewDelegate (Hot Keystroke Path)
+
+    public func textDidChange(_ notification: Notification) {
+        // CRITICAL: Do not evaluate diffs or mutate rendering attributes while IME composition is active
+        guard !textView.hasMarkedText() else { return }
+
+        let currentString = textView.string
+        let result = LineDiff.evaluate(
+            target: preparedTarget,
+            typed: currentString,
+            tolerance: diffTolerance
         )
 
-        // Update using TextKit 2 transaction
-        textContentStorage.performEditingTransaction {
-            if let textStorage = textContentStorage.textStorage {
-                textStorage.setAttributedString(attributedString)
-            }
+        applyErrorRenderingAttributes(errorRange: result.errorUTF16Range)
+        delegate?.typingView(self, didUpdateProgress: result)
+    }
+
+    public func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+            guard !textView.hasMarkedText() else { return false }
+            delegate?.typingViewDidPressReturn(self)
+            return true
         }
-
-        // Restore cursor position
-        let cursorPosition = min(visualTyped.count, visualTarget.count)
-        textView.setSelectedRange(NSRange(location: cursorPosition, length: 0))
+        return false
     }
 
-    private func updateFont() {
-        textView.font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .bold)
-        updateContent()
-    }
-
-    // MARK: - Text Styling
-
-    private func createStyledText(targetText: String, typedText: String) -> NSAttributedString {
-        let attributed = NSMutableAttributedString(string: targetText)
-        let font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .bold)
-
-        // Base attributes
-        attributed.addAttribute(.font, value: font, range: NSRange(location: 0, length: targetText.count))
-
-        // Character-by-character coloring
-        for (index, targetChar) in targetText.enumerated() {
-            let range = NSRange(location: index, length: 1)
-
-            if index < typedText.count {
-                let typedIndex = typedText.index(typedText.startIndex, offsetBy: index)
-                let typedChar = typedText[typedIndex]
-
-                if typedChar == targetChar {
-                    // Correct - green
-                    attributed.addAttribute(.foregroundColor, value: NSColor.systemGreen, range: range)
-                } else {
-                    // Incorrect - red background
-                    attributed.addAttribute(.foregroundColor, value: NSColor.white, range: range)
-                    attributed.addAttribute(.backgroundColor, value: NSColor.systemRed, range: range)
-                }
-            } else {
-                // Not typed - gray
-                attributed.addAttribute(.foregroundColor, value: NSColor.placeholderTextColor, range: range)
-            }
-        }
-
-        // Paragraph styling
-        let paragraphStyle = NSMutableParagraphStyle()
-        paragraphStyle.lineSpacing = 4
-        paragraphStyle.lineBreakMode = .byWordWrapping
-        attributed.addAttribute(.paragraphStyle, value: paragraphStyle, range: NSRange(location: 0, length: targetText.count))
-
-        return attributed
-    }
-
-    // MARK: - Special Characters
-
-    private func visualizeSpecialCharacters(in text: String) -> String {
-        return text
-            .replacingOccurrences(of: " ", with: "·")
-            .replacingOccurrences(of: "\t", with: "→")
-            .replacingOccurrences(of: "\n", with: "↵\n")
-    }
-
-    private func extractRawText(from visualText: String) -> String {
-        return visualText
-            .replacingOccurrences(of: "·", with: " ")
-            .replacingOccurrences(of: "→", with: "\t")
-            .replacingOccurrences(of: "↵", with: "")
-    }
-}
-
-// MARK: - NSTextViewDelegate
-
-@available(macOS 12.0, *)
-extension TextKit2TypingView: NSTextViewDelegate {
-
-    func textDidChange(_ notification: Notification) {
-        guard !isUpdating else { return }
-
-        let rawText = extractRawText(from: textView.string)
-        typedText = rawText
-        onTextChanged?(rawText)
-    }
-
-    func textView(_ textView: NSTextView, shouldChangeTextIn affectedCharRange: NSRange, replacementString: String?) -> Bool {
-        // Handle tab
-        if replacementString == "\t" {
-            let spaces = String(repeating: " ", count: tabSpaces)
-            textView.insertText(spaces, replacementRange: affectedCharRange)
-            return false
-        }
-
-        // Prevent typing beyond target
-        let rawTarget = extractRawText(from: targetText)
-        let currentRaw = extractRawText(from: textView.string)
-        let newLength = currentRaw.count - affectedCharRange.length + (replacementString?.count ?? 0)
-
-        if newLength > rawTarget.count {
+    public func textView(_ textView: NSTextView, shouldChangeTextIn affectedCharRange: NSRange,
+                          replacementString: String?) -> Bool {
+        guard let replacementString else { return true }
+        guard let range = Range(affectedCharRange, in: textView.string) else { return false }
+        let replacement = PracticeText.normalize(replacementString, tabSpaces: tabSpaces)
+        if replacement.contains("\n") {
             NSSound.beep()
             return false
         }
-
+        let proposed = textView.string.replacingCharacters(in: range, with: replacement)
+        guard proposed.count <= PracticeText.maximumCharacters else {
+            NSSound.beep()
+            return false
+        }
+        if replacement != replacementString {
+            textView.insertText(replacement, replacementRange: affectedCharRange)
+            return false
+        }
         return true
+    }
+
+    // MARK: - TextKit 2 Rendering Attributes (Zero Layout Re-Computation)
+
+    private func clearRenderingAttributes() {
+        let documentRange = textLayoutManager.documentRange
+        guard !documentRange.isEmpty else { return }
+        textLayoutManager.setRenderingAttributes([:], for: documentRange)
+        textView.needsDisplay = true
+    }
+
+    private func applyErrorRenderingAttributes(errorRange: NSRange?) {
+        let documentRange = textLayoutManager.documentRange
+        guard !documentRange.isEmpty else { return }
+
+        // 1. Reset existing rendering attributes across the single-line document
+        textLayoutManager.setRenderingAttributes([:], for: documentRange)
+
+        // 2. If a mismatch exists, convert UTF-16 NSRange -> NSTextRange and apply ephemeral red tint
+        if let nsErrorRange = errorRange,
+           nsErrorRange.length > 0,
+           let textRange = makeTextRange(from: nsErrorRange) {
+            let errorAttributes: [NSAttributedString.Key: Any] = [
+                .foregroundColor: NSColor.systemRed,
+                .backgroundColor: NSColor.systemRed.withAlphaComponent(0.18),
+                .underlineStyle: NSUnderlineStyle.single.rawValue,
+                .underlineColor: NSColor.systemRed
+            ]
+            textLayoutManager.setRenderingAttributes(errorAttributes, for: textRange)
+        }
+
+        textView.needsDisplay = true
+    }
+
+    private func makeTextRange(from nsRange: NSRange) -> NSTextRange? {
+        let docStart = textContentStorage.documentRange.location
+        guard let startLoc = textContentStorage.location(docStart, offsetBy: nsRange.location),
+              let endLoc = textContentStorage.location(startLoc, offsetBy: nsRange.length) else {
+            return nil
+        }
+        return NSTextRange(location: startLoc, end: endLoc)
     }
 }
 
-// MARK: - SwiftUI Wrapper
+// MARK: - SwiftUI Preview Wrapper
 
 @available(macOS 12.0, *)
-struct TextKit2TypingViewWrapper: NSViewRepresentable {
-    @Binding var typedText: String
-    @Binding var targetText: String
-    var fontSize: CGFloat
+public struct TextKit2TypingViewWrapper: NSViewRepresentable {
+    public var targetLine: String
+    public var resetToken: UInt64
+    public var fontSize: CGFloat
+    public var diffTolerance: DiffTolerance = .strictCharacter
+    public var isEnabled: Bool = true
+    public var onProgress: ((DiffResult) -> Void)?
+    public var onReturn: (() -> Void)?
 
-    @AppStorage("tabEqualsToSpaces") var spaces: Double = 4
+    public init(targetLine: String, resetToken: UInt64 = 0, fontSize: CGFloat = 16,
+                diffTolerance: DiffTolerance = .strictCharacter, isEnabled: Bool = true,
+                onProgress: ((DiffResult) -> Void)? = nil, onReturn: (() -> Void)? = nil) {
+        self.targetLine = targetLine
+        self.resetToken = resetToken
+        self.fontSize = fontSize
+        self.diffTolerance = diffTolerance
+        self.isEnabled = isEnabled
+        self.onProgress = onProgress
+        self.onReturn = onReturn
+    }
 
-    func makeNSView(context: Context) -> TextKit2TypingView {
+    public func makeCoordinator() -> Coordinator {
+        Coordinator(onProgress: onProgress, onReturn: onReturn)
+    }
+
+    public func makeNSView(context: Context) -> TextKit2TypingView {
         let view = TextKit2TypingView()
-        view.targetText = targetText
-        view.typedText = typedText
-        view.fontSize = fontSize
-        view.tabSpaces = Int(spaces)
-        view.onTextChanged = { newText in
-            typedText = newText
-        }
+        view.delegate = context.coordinator
+        view.configure(targetLine: targetLine, resetToken: resetToken, fontSize: fontSize,
+                       isEnabled: isEnabled, diffTolerance: diffTolerance)
         return view
     }
 
-    func updateNSView(_ nsView: TextKit2TypingView, context: Context) {
-        if nsView.targetText != targetText {
-            nsView.targetText = targetText
-        }
-        if nsView.fontSize != fontSize {
-            nsView.fontSize = fontSize
-        }
-        nsView.tabSpaces = Int(spaces)
+    public func updateNSView(_ nsView: TextKit2TypingView, context: Context) {
+        context.coordinator.onProgress = onProgress
+        context.coordinator.onReturn = onReturn
+        nsView.configure(targetLine: targetLine, resetToken: resetToken, fontSize: fontSize,
+                         isEnabled: isEnabled, diffTolerance: diffTolerance)
     }
-}
 
-// MARK: - Preview
+    @MainActor
+    public final class Coordinator: NSObject, TextKit2TypingViewDelegate {
+        var onProgress: ((DiffResult) -> Void)?
+        var onReturn: (() -> Void)?
 
-@available(macOS 12.0, *)
-struct TextKit2TypingViewWrapper_Previews: PreviewProvider {
-    static var previews: some View {
-        TextKit2TypingViewWrapper(
-            typedText: .constant("Hello World"),
-            targetText: .constant("Hello World! This is TextKit 2 in action."),
-            fontSize: 18
-        )
-        .frame(width: 600, height: 400)
+        init(onProgress: ((DiffResult) -> Void)?, onReturn: (() -> Void)?) {
+            self.onProgress = onProgress
+            self.onReturn = onReturn
+        }
+
+        public func typingView(_ view: TextKit2TypingView, didUpdateProgress result: DiffResult) {
+            onProgress?(result)
+        }
+
+        public func typingViewDidPressReturn(_ view: TextKit2TypingView) {
+            onReturn?()
+        }
     }
 }

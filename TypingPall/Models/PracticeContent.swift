@@ -1,6 +1,6 @@
 import Foundation
 
-enum CodeLanguage: String, Codable, CaseIterable, Identifiable {
+enum CodeLanguage: String, Codable, CaseIterable, Identifiable, Sendable {
     case plainText, python, cpp, rust, go, ruby, shell, swift, javascript, typescript, sql, java, kotlin
     var id: String { rawValue }
     var title: String {
@@ -44,7 +44,7 @@ enum CodeLanguage: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-struct LessonTrack: RawRepresentable, Codable, CaseIterable, Identifiable, Hashable, CustomStringConvertible {
+struct LessonTrack: RawRepresentable, Codable, CaseIterable, Identifiable, Hashable, CustomStringConvertible, Sendable {
     let rawValue: String
     init(rawValue: String) { self.rawValue = rawValue }
     init(_ rawValue: String) { self.rawValue = rawValue }
@@ -97,7 +97,7 @@ struct LessonTrack: RawRepresentable, Codable, CaseIterable, Identifiable, Hasha
     }
 }
 
-struct PracticeLesson: Codable, Identifiable, Hashable {
+struct PracticeLesson: Codable, Identifiable, Hashable, Sendable {
     let id: String
     let title: String
     let category: String
@@ -152,13 +152,13 @@ enum PracticeCatalog {
     }
 }
 
-struct LessonSection: Identifiable, Equatable {
+struct LessonSection: Identifiable, Equatable, Sendable {
     let title: String
     let lessons: [PracticeLesson]
     var id: String { title }
 }
 
-struct PracticeLine: Equatable {
+struct PracticeLine: Equatable, Sendable {
     let sourceIndex: Int
     let text: String
 }

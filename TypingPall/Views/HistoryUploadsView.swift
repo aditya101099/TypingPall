@@ -1,15 +1,13 @@
 import SwiftUI
-import CoreData
 
 struct HistoryUploadsView: View {
     private enum Shelf: Hashable { case lessons(LessonTrack?), scripts }
 
-    @Environment(\.managedObjectContext) private var viewContext
+    @Environment(\.persistenceRepository) private var repository
     @Environment(\.dismiss) private var dismiss
-    @FetchRequest(sortDescriptors: [NSSortDescriptor(keyPath: \Item.timestamp, ascending: false)], animation: .default)
-    private var items: FetchedResults<Item>
+    @State private var savedScriptsList: [HistoryRecordDTO] = []
     @State private var errorMessage: String?
-    @State private var pendingDeletion: Item?
+    @State private var pendingDeletion: HistoryRecordDTO?
     @State private var search = ""
     @State private var shelf = Shelf.lessons(nil)
     @State private var category: String?
@@ -45,22 +43,41 @@ struct HistoryUploadsView: View {
                 Text("My scripts").tag(Shelf.scripts)
             }
             .pickerStyle(.segmented).labelsHidden()
-            .onChange(of: shelf) { _ in category = nil }
+            .onChange(of: shelf) { newShelf in
+                category = nil
+                if newShelf == .scripts { loadScripts() }
+            }
+            .task { loadScripts() }
             if shelf == .scripts { savedScripts } else { builtInLessons }
         }.padding(24)
         .alert("Delete this script?", isPresented: Binding(get: { pendingDeletion != nil }, set: { if !$0 { pendingDeletion = nil } })) {
             Button("Cancel", role: .cancel) { pendingDeletion = nil }
             Button("Delete", role: .destructive) {
                 guard let item = pendingDeletion else { return }
-                viewContext.delete(item)
-                do { try viewContext.save() }
-                catch { viewContext.rollback(); errorMessage = error.localizedDescription }
-                pendingDeletion = nil
+                Task {
+                    do {
+                        _ = try await repository.deleteScript(id: item.id)
+                        loadScripts()
+                    } catch {
+                        errorMessage = error.localizedDescription
+                    }
+                    pendingDeletion = nil
+                }
             }
         } message: { Text("This removes the saved script from your library.") }
         .alert("Couldn’t delete the script", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
             Button("OK", role: .cancel) { errorMessage = nil }
         } message: { Text(errorMessage ?? "") }
+    }
+
+    private func loadScripts() {
+        Task {
+            do {
+                savedScriptsList = try await repository.fetchRecentScripts()
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
     }
 
     private var builtInLessons: some View {
@@ -142,7 +159,7 @@ struct HistoryUploadsView: View {
 
     private var savedScripts: some View {
         Group {
-            if items.isEmpty {
+            if savedScriptsList.isEmpty {
                 VStack(spacing: 12) {
                     Image(systemName: "books.vertical").font(.largeTitle)
                     Text("Save your own patterns here").font(.headline)
@@ -155,20 +172,20 @@ struct HistoryUploadsView: View {
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List {
-                    ForEach(items) { item in
+                    ForEach(savedScriptsList) { item in
                         HStack(spacing: 16) {
                             VStack(alignment: .leading, spacing: 6) {
-                                Text(item.text ?? "Untitled script").font(.system(.body, design: .monospaced)).lineLimit(2)
+                                Text(item.text).font(.system(.body, design: .monospaced)).lineLimit(2)
                                 HStack {
-                                    Text((CodeLanguage(rawValue: item.language ?? "") ?? .plainText).title)
-                                    if let date = item.timestamp { Text(date, style: .date) }
+                                    Text((CodeLanguage(rawValue: item.language) ?? .plainText).title)
+                                    Text(item.timestamp, style: .date)
                                 }.font(.caption).foregroundColor(.secondary)
                             }
                             Spacer()
                             Button("Practice") {
-                                onSelect(item.text ?? "", CodeLanguage(rawValue: item.language ?? "") ?? .plainText)
+                                onSelect(item.text, CodeLanguage(rawValue: item.language) ?? .plainText)
                                 dismiss()
-                            }.disabled((item.text ?? "").isEmpty)
+                            }.disabled(item.text.isEmpty)
                             Button { pendingDeletion = item } label: { Image(systemName: "trash") }
                                 .accessibilityLabel("Delete script")
                         }.padding(.vertical, 8)

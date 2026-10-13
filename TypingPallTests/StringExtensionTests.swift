@@ -115,6 +115,7 @@ final class PracticeTextTests: XCTestCase {
     }
 }
 
+@MainActor
 final class PatternPracticeTests: XCTestCase {
     func testRequiresMatchingLineBeforeAdvancing() throws {
         let model = TypingScreenViewModel()
@@ -293,6 +294,7 @@ final class EditorRegressionTests: XCTestCase {
     }
 }
 
+@MainActor
 extension EditorRegressionTests {
     func testSavedLibrarySurvivesReopeningStore() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -336,6 +338,7 @@ extension EditorRegressionTests {
     }
 }
 
+@MainActor
 final class CommentSkippingTests: XCTestCase {
     func testPythonCommentsDoNotRemoveDivisionStringsOrDocstrings() {
         let source = ["# explanation", "half = 10 // 2 # floor division", "url = 'https://example.com/#anchor'", "text = \"\"\"", "# literal data", "\"\"\""]
@@ -424,6 +427,7 @@ final class CommentSkippingTests: XCTestCase {
     }
 }
 
+@MainActor
 extension EditorRegressionTests {
     func testLegacyLibraryMigratesWithoutLosingScripts() async throws {
         let modelDirectory = try XCTUnwrap(Bundle.main.url(forResource: "TypingPall", withExtension: "momd"))

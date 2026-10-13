@@ -36,12 +36,25 @@ struct PracticeInputPanel: View {
                         .accessibilityLabel(stripLabel)
                         .accessibilityHint("The line to type")
                 }
-                TextKit2TypingEditor(typedText: $viewModel.editorText, targetText: .constant(viewModel.currentLine),
-                                     fontSize: fontSize, tabSpaces: viewModel.sessionTabSpaces,
-                                     isEnabled: viewModel.hasPracticeLines && !viewModel.isComplete, resetID: viewModel.sessionID,
-                                     liveFeedback: viewModel.mode == .copy,
-                                     onSubmit: { viewModel.advanceLine() }, onReject: { notice = $0.message })
-                    .frame(minHeight: 100, idealHeight: 130, maxHeight: 160)
+                TextKit2TypingViewWrapper(
+                    targetLine: viewModel.currentLine,
+                    resetToken: viewModel.bufferResetToken,
+                    fontSize: fontSize,
+                    diffTolerance: viewModel.diffTolerance,
+                    isEnabled: viewModel.hasPracticeLines && !viewModel.isComplete,
+                    onProgress: { result in
+                        notice = nil
+                        viewModel.send(.editorProgressChanged(
+                            matchedCount: result.matchedTargetCharacters,
+                            errorRange: result.errorUTF16Range,
+                            isComplete: result.isComplete
+                        ))
+                    },
+                    onReturn: {
+                        viewModel.send(.commitLineOnReturn)
+                    }
+                )
+                .frame(minHeight: 100, idealHeight: 130, maxHeight: 160)
             }
             .background(Color(NSColor.textBackgroundColor))
             .cornerRadius(12)

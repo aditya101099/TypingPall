@@ -23,6 +23,7 @@
 		7DCAA2B12A5FF5C700AFC118 /* HistoryUploadsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DCAA2B02A5FF5C700AFC118 /* HistoryUploadsView.swift */; };
 		7DCAA2B42A60024A00AFC118 /* String+Utils.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DCAA2B32A60024A00AFC118 /* String+Utils.swift */; };
 		9595215C2EB49A4F00216F1E /* TextKit2TypingEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9595215A2EB49A4F00216F1E /* TextKit2TypingEditor.swift */; };
+		9595215D2EB49A4F00216F1E /* TextKit2TypingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9595215B2EB49A4F00216F1E /* TextKit2TypingView.swift */; };
 		B20000000000000000000001 /* TypingPall/Models/PracticeContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000002 /* TypingPall/Models/PracticeContent.swift */; };
 		B20000000000000000000003 /* TypingPall/Content/lessons.json in Resources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000004 /* TypingPall/Content/lessons.json */; };
 		C10000000000000000000002 /* TypingPall/Models/LineDiff.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000001 /* TypingPall/Models/LineDiff.swift */; };
@@ -33,6 +34,11 @@
 		C1000000000000000000000C /* PracticeOptionsPopover.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000000000000000000000B /* PracticeOptionsPopover.swift */; };
 		C20000000000000000000002 /* TypingPall/Models/PracticeLadder.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000001 /* TypingPall/Models/PracticeLadder.swift */; };
 		C20000000000000000000004 /* PracticeLadderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000003 /* PracticeLadderTests.swift */; };
+		C40000000000000000000002 /* TypingPall/Models/DrillState.swift in Sources */ = {isa = PBXBuildFile; fileRef = C40000000000000000000001 /* TypingPall/Models/DrillState.swift */; };
+		C50000000000000000000002 /* LineDiffTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C50000000000000000000001 /* LineDiffTests.swift */; };
+		C60000000000000000000002 /* TypingPall/PersistenceRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = C60000000000000000000001 /* TypingPall/PersistenceRepository.swift */; };
+		C70000000000000000000002 /* PersistenceRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C70000000000000000000001 /* PersistenceRepositoryTests.swift */; };
+		C80000000000000000000002 /* DrillStateMachineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C80000000000000000000001 /* DrillStateMachineTests.swift */; };
 		C20000000000000000000006 /* AttemptOutcomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000005 /* AttemptOutcomeView.swift */; };
 		C30000000000000000000002 /* TypingPall/Models/LessonMetadata.swift in Sources */ = {isa = PBXBuildFile; fileRef = C30000000000000000000001 /* TypingPall/Models/LessonMetadata.swift */; };
 		C30000000000000000000004 /* LessonNotesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C30000000000000000000003 /* LessonNotesView.swift */; };
@@ -66,7 +72,6 @@
 
 /* Begin PBXFileReference section */
 		7D76E1942A6FBC7F00D76E59 /* TypingScreenViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TypingScreenViewModel.swift; sourceTree = "<group>"; };
-		7D76E1972A6FBE6300D76E59 /* Context.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Context.swift; sourceTree = "<group>"; };
 		7DC1508F2A7D3D2F00AE7358 /* SettingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingView.swift; sourceTree = "<group>"; };
 		7DC150912A8657E200AE7358 /* AppearanceSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppearanceSettingsView.swift; sourceTree = "<group>"; };
 		7DC150932A86583200AE7358 /* PrivacySettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivacySettingsView.swift; sourceTree = "<group>"; };
@@ -84,10 +89,8 @@
 		7DCAA2A72A5F340100AFC118 /* TypingScreenView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TypingScreenView.swift; sourceTree = "<group>"; };
 		7DCAA2A92A5FE84600AFC118 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		7DCAA2AA2A5FEC8800AFC118 /* KeyboardLayoutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardLayoutView.swift; sourceTree = "<group>"; };
-		7DCAA2AE2A5FF3CE00AFC118 /* TypingEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TypingEditor.swift; sourceTree = "<group>"; };
 		7DCAA2B02A5FF5C700AFC118 /* HistoryUploadsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryUploadsView.swift; sourceTree = "<group>"; };
 		7DCAA2B32A60024A00AFC118 /* String+Utils.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "String+Utils.swift"; sourceTree = "<group>"; };
-		959521592EB49A4F00216F1E /* ModernTypingEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModernTypingEditor.swift; sourceTree = "<group>"; };
 		9595215A2EB49A4F00216F1E /* TextKit2TypingEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextKit2TypingEditor.swift; sourceTree = "<group>"; };
 		9595215B2EB49A4F00216F1E /* TextKit2TypingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextKit2TypingView.swift; sourceTree = "<group>"; };
 		A10000000000000000000002 /* TypingPall/Models/TypingStatistics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TypingPall/Models/TypingStatistics.swift; sourceTree = SOURCE_ROOT; };
@@ -116,6 +119,11 @@
 		C30000000000000000000011 /* BugHuntBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BugHuntBanner.swift; sourceTree = "<group>"; };
 		C30000000000000000000013 /* ContrastReferenceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContrastReferenceView.swift; sourceTree = "<group>"; };
 		C30000000000000000000015 /* PatternDrillTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PatternDrillTests.swift; sourceTree = "<group>"; };
+		C40000000000000000000001 /* TypingPall/Models/DrillState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TypingPall/Models/DrillState.swift; sourceTree = SOURCE_ROOT; };
+		C50000000000000000000001 /* LineDiffTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LineDiffTests.swift; sourceTree = "<group>"; };
+		C60000000000000000000001 /* TypingPall/PersistenceRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TypingPall/PersistenceRepository.swift; sourceTree = SOURCE_ROOT; };
+		C70000000000000000000001 /* PersistenceRepositoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceRepositoryTests.swift; sourceTree = "<group>"; };
+		C80000000000000000000001 /* DrillStateMachineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrillStateMachineTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -162,9 +170,6 @@
 		7D76E1962A6FBE4F00D76E59 /* Editor */ = {
 			isa = PBXGroup;
 			children = (
-				7DCAA2AE2A5FF3CE00AFC118 /* TypingEditor.swift */,
-				7D76E1972A6FBE6300D76E59 /* Context.swift */,
-				959521592EB49A4F00216F1E /* ModernTypingEditor.swift */,
 				9595215A2EB49A4F00216F1E /* TextKit2TypingEditor.swift */,
 				9595215B2EB49A4F00216F1E /* TextKit2TypingView.swift */,
 			);
@@ -224,6 +229,8 @@
 				7DCAA27C2A5F33D700AFC118 /* Preview Content */,
 				C10000000000000000000001 /* TypingPall/Models/LineDiff.swift */,
 				C20000000000000000000001 /* TypingPall/Models/PracticeLadder.swift */,
+				C40000000000000000000001 /* TypingPall/Models/DrillState.swift */,
+				C60000000000000000000001 /* TypingPall/PersistenceRepository.swift */,
 			);
 			path = TypingPall;
 			sourceTree = "<group>";
@@ -245,6 +252,9 @@
 				C30000000000000000000015 /* PatternDrillTests.swift */,
 				C10000000000000000000003 /* PracticeScreenTests.swift */,
 				C20000000000000000000003 /* PracticeLadderTests.swift */,
+				C50000000000000000000001 /* LineDiffTests.swift */,
+				C70000000000000000000001 /* PersistenceRepositoryTests.swift */,
+				C80000000000000000000001 /* DrillStateMachineTests.swift */,
 			);
 			path = TypingPallTests;
 			sourceTree = "<group>";
@@ -425,6 +435,7 @@
 				7DCAA2832A5F33D700AFC118 /* TypingPall.xcdatamodeld in Sources */,
 				7DCAA2AB2A5FEC8800AFC118 /* KeyboardLayoutView.swift in Sources */,
 				9595215C2EB49A4F00216F1E /* TextKit2TypingEditor.swift in Sources */,
+				9595215D2EB49A4F00216F1E /* TextKit2TypingView.swift in Sources */,
 				7DC150902A7D3D2F00AE7358 /* SettingView.swift in Sources */,
 				7DC150922A8657E200AE7358 /* AppearanceSettingsView.swift in Sources */,
 				7DC150942A86583200AE7358 /* PrivacySettingsView.swift in Sources */,
@@ -438,6 +449,8 @@
 				C3000000000000000000000A /* RecognitionDrillView.swift in Sources */,
 				C30000000000000000000012 /* BugHuntBanner.swift in Sources */,
 				C30000000000000000000014 /* ContrastReferenceView.swift in Sources */,
+				C40000000000000000000002 /* TypingPall/Models/DrillState.swift in Sources */,
+				C60000000000000000000002 /* TypingPall/PersistenceRepository.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -451,6 +464,9 @@
 				C30000000000000000000016 /* PatternDrillTests.swift in Sources */,
 				C10000000000000000000004 /* PracticeScreenTests.swift in Sources */,
 				C20000000000000000000004 /* PracticeLadderTests.swift in Sources */,
+				C50000000000000000000002 /* LineDiffTests.swift in Sources */,
+				C70000000000000000000002 /* PersistenceRepositoryTests.swift in Sources */,
+				C80000000000000000000002 /* DrillStateMachineTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

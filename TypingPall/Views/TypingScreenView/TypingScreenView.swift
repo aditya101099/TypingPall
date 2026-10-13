@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 struct TypingScreenView: View {
     private enum LibraryAction { case addScript, importFile }
 
-    @Environment(\.managedObjectContext) private var viewContext
+    @Environment(\.persistenceRepository) private var repository
     @StateObject private var viewModel = TypingScreenViewModel()
     @State private var isImporting = false
     @State private var isShowingOptions = false
@@ -60,7 +60,7 @@ struct TypingScreenView: View {
                 ReferenceCodeView(rows: viewModel.referenceRows, fontSize: safeFontSize,
                                   currentIndex: viewModel.currentLineIndex, contentKey: viewModel.placeholderText,
                                   language: viewModel.language,
-                                  onSelectRow: viewModel.bugHunt?.phase == .finding ? viewModel.selectReferenceLine : nil)
+                                  onSelectRow: rowSelectionHandler)
             }
             if viewModel.isComplete {
                 CompletionCard(title: viewModel.lessonTitle, nextLesson: viewModel.nextLesson,
@@ -115,7 +115,11 @@ struct TypingScreenView: View {
                 let data = try handle.read(upToCount: PracticeText.maximumFileBytes + 1) ?? Data()
                 guard data.count <= PracticeText.maximumFileBytes else { throw PracticeText.ValidationError.tooLarge }
                 guard let text = String(data: data, encoding: .utf8) else { throw PracticeText.ValidationError.binary }
-                try saveAndLoad(text, language: CodeLanguage.from(fileExtension: url.pathExtension))
+                Task {
+                    do {
+                        try await saveAndLoad(text, language: CodeLanguage.from(fileExtension: url.pathExtension))
+                    } catch { errorMessage = error.localizedDescription }
+                }
             } catch { errorMessage = error.localizedDescription }
         }
         .alert("Couldn’t complete that action", isPresented: Binding(get: { errorMessage != nil && !viewModel.isShowingPlaceholderText }, set: { if !$0 { errorMessage = nil } })) {
@@ -149,6 +153,11 @@ struct TypingScreenView: View {
         viewModel.textViewFontSize.isFinite ? min(30, max(12, viewModel.textViewFontSize)) : 25
     }
 
+    private var rowSelectionHandler: ((Int) -> Void)? {
+        guard viewModel.bugHunt?.phase == .finding else { return nil }
+        return { line in viewModel.selectReferenceLine(line) }
+    }
+
     // Interim ⌘1–⌘3 until menus exist; opacity 0 (not hidden) keeps the shortcuts registered.
     private var modeShortcuts: some View {
         ZStack {
@@ -180,10 +189,12 @@ struct TypingScreenView: View {
                 Button("Cancel") { viewModel.isShowingPlaceholderText = false }.keyboardShortcut(.cancelAction)
                 Spacer()
                 Button("Save & Practice") {
-                    do {
-                        try saveAndLoad(viewModel.temPlaceholderText, language: viewModel.draftLanguage)
-                        viewModel.isShowingPlaceholderText = false
-                    } catch { errorMessage = error.localizedDescription }
+                    Task {
+                        do {
+                            try await saveAndLoad(viewModel.temPlaceholderText, language: viewModel.draftLanguage)
+                            viewModel.isShowingPlaceholderText = false
+                        } catch { errorMessage = error.localizedDescription }
+                    }
                 }
                 .keyboardShortcut(.defaultAction)
                 .disabled(viewModel.temPlaceholderText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -191,15 +202,10 @@ struct TypingScreenView: View {
         }.padding(24).frame(width: 620)
     }
 
-    private func saveAndLoad(_ text: String, language: CodeLanguage) throws {
+    private func saveAndLoad(_ text: String, language: CodeLanguage) async throws {
         let width = PracticeText.tabWidth(UserDefaults.standard.object(forKey: "tabEqualsToSpaces") as? Double ?? 4)
         let normalized = try PracticeText.validated(text, tabSpaces: width)
-        let item = Item(context: viewContext)
-        item.timestamp = Date()
-        item.text = normalized
-        item.language = language.rawValue
-        do { try viewContext.save() }
-        catch { viewContext.rollback(); throw error }
+        try await repository.saveScript(text: normalized, language: language.rawValue)
         load(normalized, language: language)
     }
 

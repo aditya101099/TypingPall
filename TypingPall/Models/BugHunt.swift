@@ -1,8 +1,8 @@
 import Foundation
 
 /// Shows a lesson with one planted bug; the learner finds the line, then types the fix.
-struct BugHunt: Equatable {
-    enum Phase: Equatable { case finding, fixing, solved }
+struct BugHunt: Equatable, Sendable {
+    enum Phase: Equatable, Sendable { case finding, fixing, solved }
 
     let lessonID: String
     let mutation: LessonMutation

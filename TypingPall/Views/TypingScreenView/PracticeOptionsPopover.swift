@@ -17,6 +17,13 @@ struct PracticeOptionsPopover: View {
             if viewModel.mode.isGraded {
                 Text("Comments stay visible as cues.").font(.caption).foregroundColor(.secondary)
             }
+            Picker("Spacing", selection: Binding(get: { viewModel.diffTolerance }, set: { viewModel.setDiffTolerance($0) })) {
+                Text("Strict").tag(DiffTolerance.strictCharacter)
+                Text("Relaxed").tag(DiffTolerance.syntaxAwareTrivia)
+            }
+            .pickerStyle(.segmented)
+            .accessibilityIdentifier("diffTolerancePicker")
+            Text(toleranceCaption(for: viewModel.diffTolerance)).font(.caption).foregroundColor(.secondary)
             Picker("Language", selection: Binding(get: { viewModel.language }, set: { viewModel.setLanguage($0) })) {
                 ForEach(CodeLanguage.allCases) { Text($0.title).tag($0) }
             }
@@ -25,6 +32,13 @@ struct PracticeOptionsPopover: View {
         }
         .padding(16)
         .frame(width: 320)
+    }
+
+    private func toleranceCaption(for tolerance: DiffTolerance) -> String {
+        switch tolerance {
+        case .strictCharacter: return "Strict: exact character-for-character spacing."
+        case .syntaxAwareTrivia: return "Relaxed: flexible spaces around operators."
+        }
     }
 
     private func caption(for mode: PracticeMode) -> String {

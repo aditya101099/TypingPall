@@ -1,6 +1,6 @@
 import Foundation
 
-enum PracticeMode: Int, CaseIterable, Identifiable, Comparable {
+enum PracticeMode: Int, CaseIterable, Identifiable, Comparable, Sendable {
     case copy, keyLines, recall
     var id: Int { rawValue }
     var title: String { ["Copy", "Key lines", "Recall"][rawValue] }
@@ -60,26 +60,26 @@ enum PracticeLineSelection {
     }
 }
 
-enum ReviewGrade: Int, CaseIterable, Comparable {
+enum ReviewGrade: Int, CaseIterable, Comparable, Sendable {
     case again = 1, hard, good, easy
     var title: String { ["Forgot", "Shaky", "Solid", "Effortless"][rawValue - 1] }
     static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
 }
 
-enum SelfRating: Int, CaseIterable, Identifiable {
+enum SelfRating: Int, CaseIterable, Identifiable, Sendable {
     case forgot = 1, shaky, solid, effortless
     var id: Int { rawValue }
     var grade: ReviewGrade { ReviewGrade(rawValue: rawValue) ?? .good }
     var title: String { grade.title }
 }
 
-struct LineAttempt: Equatable {
+struct LineAttempt: Equatable, Sendable {
     var wrongSubmits = 0, hints = 0
     var repeated = false, revealed = false
     var isClean: Bool { wrongSubmits == 0 && hints == 0 && !repeated && !revealed }
 }
 
-struct AttemptSummary: Equatable {
+struct AttemptSummary: Equatable, Sendable {
     let mode: PracticeMode
     let lines: [Int: LineAttempt]
     var cleanLines: Set<Int> { Set(lines.filter { $0.value.isClean }.keys) }

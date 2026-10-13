@@ -3,7 +3,9 @@
 import argparse
 import asyncio
 import bisect
+import fractions
 from fractions import Fraction
+import hashlib
 import itertools
 import json
 import math
@@ -802,8 +804,32 @@ EXPECTED = {
 }
 
 
+CACHE_FILE = ROOT / 'build/verified_lessons.json'
+
+
+def load_verification_cache():
+    if CACHE_FILE.exists():
+        try:
+            return json.loads(CACHE_FILE.read_text())
+        except Exception:
+            return {}
+    return {}
+
+
+def save_verification_cache(cache):
+    CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    CACHE_FILE.write_text(json.dumps(cache, indent=2, sort_keys=True))
+
+
+def snippet_key(language, toolchain, code):
+    payload = f"{language}:{toolchain}:{code}".encode('utf-8')
+    return hashlib.sha256(payload).hexdigest()
+
+
 def check_compiled(require_all):
     missing = []
+    cache = load_verification_cache()
+    cache_dirty = False
     with tempfile.TemporaryDirectory(prefix='typingpall-lessons-') as directory:
         folder = Path(directory)
         env = dict(os.environ, GOCACHE=str(folder/'go-cache'), GOPROXY='off', GOTOOLCHAIN='local')
@@ -813,8 +839,19 @@ def check_compiled(require_all):
                 missing.append(tool)
                 print(f'SKIP: {language} execution ({tool} is not installed)')
                 continue
+            if tool == 'go':
+                v_res = subprocess.run([compiler, 'version'], capture_output=True, text=True)
+            else:
+                v_res = subprocess.run([compiler, '--version'], capture_output=True, text=True)
+            v_lines = v_res.stdout.splitlines()
+            tool_version = v_lines[0] if v_lines else tool
             examples = [lesson for lesson in LESSONS if lesson['language'] == language]
+            cached_count = 0
             for lesson in examples:
+                key = snippet_key(language, tool_version, lesson['code'])
+                if key in cache:
+                    cached_count += 1
+                    continue
                 source = folder / (lesson['id'] + '.' + extension)
                 binary = folder / lesson['id']
                 source.write_text(lesson['code'])
@@ -827,19 +864,44 @@ def check_compiled(require_all):
                 subprocess.run(command, check=True, env=env, capture_output=True, text=True, timeout=120)
                 output = subprocess.run([str(binary)], check=True, capture_output=True, text=True, timeout=10).stdout.strip()
                 assert output == EXPECTED[lesson['id']], (lesson['id'], output)
-            print(f'PASS: {len(examples)} {language} lessons compiled and executed')
+                cache[key] = True
+                cache_dirty = True
+            cached_suffix = f' ({cached_count} cached)' if cached_count else ''
+            print(f'PASS: {len(examples)} {language} lessons compiled and executed{cached_suffix}')
         ruby = shutil.which('ruby')
         if ruby:
-            for lesson in [l for l in LESSONS if l['language'] == 'ruby']:
+            ruby_version = subprocess.run([ruby, '--version'], capture_output=True, text=True).stdout.splitlines()[0]
+            ruby_lessons = [l for l in LESSONS if l['language'] == 'ruby']
+            cached_ruby = 0
+            for lesson in ruby_lessons:
+                key = snippet_key('ruby', ruby_version, lesson['code'])
+                if key in cache:
+                    cached_ruby += 1
+                    continue
                 source = folder / (lesson['id'] + '.rb')
                 source.write_text(lesson['code'])
                 subprocess.run([ruby, '-c', str(source)], check=True, capture_output=True, text=True)
-            print(f"PASS: {len([l for l in LESSONS if l['language'] == 'ruby'])} Ruby lessons validated")
+                cache[key] = True
+                cache_dirty = True
+            cached_suffix = f' ({cached_ruby} cached)' if cached_ruby else ''
+            print(f"PASS: {len(ruby_lessons)} Ruby lessons validated{cached_suffix}")
         shell = shutil.which('sh')
         if shell:
-            for lesson in [l for l in LESSONS if l['language'] == 'shell']:
+            shell_version = "sh"
+            shell_lessons = [l for l in LESSONS if l['language'] == 'shell']
+            cached_shell = 0
+            for lesson in shell_lessons:
+                key = snippet_key('shell', shell_version, lesson['code'])
+                if key in cache:
+                    cached_shell += 1
+                    continue
                 subprocess.run([shell, '-n', '-c', lesson['code']], check=True, capture_output=True, text=True)
-            print(f"PASS: {len([l for l in LESSONS if l['language'] == 'shell'])} Shell lessons validated")
+                cache[key] = True
+                cache_dirty = True
+            cached_suffix = f' ({cached_shell} cached)' if cached_shell else ''
+            print(f"PASS: {len(shell_lessons)} Shell lessons validated{cached_suffix}")
+    if cache_dirty:
+        save_verification_cache(cache)
     if missing and require_all:
         raise SystemExit('Missing required compilers: ' + ', '.join(missing))
 

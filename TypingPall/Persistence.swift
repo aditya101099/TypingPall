@@ -1,7 +1,7 @@
 import CoreData
 
 final class PersistenceController: ObservableObject {
-    private static let model = NSPersistentContainer(name: "TypingPall").managedObjectModel
+    static let model = NSPersistentContainer(name: "TypingPall").managedObjectModel
     static let shared = PersistenceController()
     static let preview = PersistenceController(inMemory: true)
 

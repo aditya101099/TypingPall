@@ -1,7 +1,7 @@
 import Foundation
 
 /// A variant lesson set against its base, so only the lines that differ are hidden and typed.
-struct ContrastPair: Equatable {
+struct ContrastPair: Equatable, Sendable {
     let base: PracticeLesson
     let variant: PracticeLesson
     let differingLines: Set<Int>    // variant lines hidden and typed

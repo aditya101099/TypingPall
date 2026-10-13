@@ -1,5 +1,6 @@
 import SwiftUI
 
+@MainActor
 final class TypingScreenViewModel: ObservableObject {
     static let starterPattern = """
     // Binary search: narrow a half-open interval [left, right).
@@ -19,7 +20,13 @@ final class TypingScreenViewModel: ObservableObject {
     """
 
     @Published var editorText = "" {
-        didSet { if editorText != oldValue { submitFeedback = nil; hintOffset = nil } }
+        didSet {
+            if editorText != oldValue {
+                submitFeedback = nil
+                hintOffset = nil
+                syncPhase()
+            }
+        }
     }
     @Published var isShowingPlaceholderText = false
     @Published var isShowingHistoryUploads = false
@@ -57,12 +64,32 @@ final class TypingScreenViewModel: ObservableObject {
     private var weakLineIndices: Set<Int> = []
     private var resumeMode: PracticeMode?   // the learner's mode before a bug hunt or contrast pair
 
+    // MARK: - State Machine & Reducer Integration (Argon Architecture)
+    @Published public private(set) var phase: DrillPhase = .typing(subMode: .copy, currentLineIndex: 0, lineProgress: LineProgress())
+    public private(set) var bufferResetToken: UInt64 = 0
+    @Published public var diffTolerance: DiffTolerance = .strictCharacter {
+        didSet {
+            defaults.set(diffTolerance.rawValue, forKey: "ux.diffTolerance")
+            syncPhase()
+        }
+    }
+    private var cleanLineCount: Int = 0
+    private var currentLineHadError: Bool = false
+    private var sessionStartTime: Date = Date()
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         skipComments = defaults.object(forKey: "skipPracticeComments") as? Bool ?? true
         draftLanguage = CodeLanguage(rawValue: defaults.string(forKey: "ux.lastScriptLanguage") ?? "") ?? .plainText
         sessionTabSpaces = PracticeText.tabWidth(spaces)
+        if let savedTolerance = defaults.string(forKey: "ux.diffTolerance"),
+           let tolerance = DiffTolerance(rawValue: savedTolerance) {
+            self.diffTolerance = tolerance
+        } else {
+            self.diffTolerance = .strictCharacter
+        }
         rebuildPracticeLines()
+        syncPhase()
     }
 
     var hasPracticeLines: Bool { !practiceLines.isEmpty }
@@ -81,10 +108,17 @@ final class TypingScreenViewModel: ObservableObject {
         // Keep the source indentation visible, but start practice at the first content character.
         return String(practiceLines[practicePosition].text.drop(while: { $0 == " " || $0 == "\t" }))
     }
-    var isLineMatched: Bool { hasPracticeLines && editorText == currentLine }
+    var isLineMatched: Bool {
+        guard hasPracticeLines else { return false }
+        if currentLine.isEmpty { return true }
+        if case let .typing(_, _, progress) = phase {
+            return progress.isLineComplete
+        }
+        return editorText == currentLine
+    }
     /// Graded modes also accept a line that differs only in spacing; Copy stays exact.
     private var isCurrentLineAccepted: Bool {
-        isLineMatched || (mode.isGraded && hasPracticeLines && editorText.filter { !$0.isWhitespace } == currentLine.filter { !$0.isWhitespace })
+        isLineMatched || (mode.isGraded && hasPracticeLines && !editorText.isEmpty && editorText.filter { !$0.isWhitespace } == currentLine.filter { !$0.isWhitespace })
     }
     /// The target strip: the line in Copy, else bars plus hint-revealed text.
     var visibleTarget: String {
@@ -165,6 +199,11 @@ final class TypingScreenViewModel: ObservableObject {
         rebuildPracticeLines()
     }
 
+    public func setDiffTolerance(_ tolerance: DiffTolerance) {
+        guard diffTolerance != tolerance else { return }
+        diffTolerance = tolerance
+    }
+
     func loadLesson(_ lesson: PracticeLesson) throws {
         try load(lesson.code, language: lesson.language, lesson: lesson)
     }
@@ -175,6 +214,7 @@ final class TypingScreenViewModel: ObservableObject {
 
     /// Shows the lesson with one planted bug; the learner clicks the wrong line, then types the fix from memory.
     func startBugHunt(_ lesson: PracticeLesson, mutationIndex: Int? = nil) throws {
+        print(">>> [DEBUG] startBugHunt called for lesson: \(lesson.id), mutations=\(lesson.mutations?.count ?? 0)")
         guard let count = lesson.mutations?.count, count > 0,
               let hunt = BugHunt(lesson: lesson, mutationIndex: mutationIndex ?? Int.random(in: 0..<count)) else { return }
         try loadLesson(lesson)
@@ -186,10 +226,19 @@ final class TypingScreenViewModel: ObservableObject {
     }
 
     func selectReferenceLine(_ index: Int) {
-        guard var hunt = bugHunt else { return }
+        print(">>> [DEBUG] selectReferenceLine called with: \(index)")
+        guard var hunt = bugHunt else {
+            print(">>> [DEBUG] selectReferenceLine: bugHunt is nil!")
+            return
+        }
         let found = hunt.select(line: index)
+        print(">>> [DEBUG] selectReferenceLine: found=\(found), wrongGuesses=\(hunt.wrongGuesses)")
         bugHunt = hunt
-        if found { rebuildPracticeLines() }
+        if found {
+            rebuildPracticeLines()
+        } else {
+            syncPhase()
+        }
     }
 
     /// Practices the variant with only the lines that differ from its base hidden and typed.
@@ -248,19 +297,24 @@ final class TypingScreenViewModel: ObservableObject {
                                                     explanation: lesson?.knownMistake(on: currentLineIndex, typed: editorText)?.explanation)
             return false
         }
+        if !currentLineHadError { cleanLineCount += 1 }
+        currentLineHadError = false
         if isLastPracticeLine {
+            bufferResetToken &+= 1
             complete()
         } else {
             practicePosition += 1
             revealedLength = 0
             resetInput()
         }
+        syncPhase()
         return true
     }
 
     func repeatLine() {
         if !editorText.isEmpty, hasPracticeLines, !isComplete { lineAttempts[currentLineIndex, default: LineAttempt()].repeated = true }
         resetInput()
+        syncPhase()
     }
 
     /// Graded modes reveal through the next token, and the third hint reveals the line; Copy points at the next character.
@@ -270,14 +324,16 @@ final class TypingScreenViewModel: ObservableObject {
         let typedPrefix = LineDiff(typed: editorText, target: target).firstMismatch ?? editorText.count
         guard typedPrefix < target.count else { return }   // everything typed so far is right; nothing to hint
         lineAttempts[currentLineIndex, default: LineAttempt()].hints += 1
-        guard mode.isGraded else { hintOffset = typedPrefix; return }
+        guard mode.isGraded else { hintOffset = typedPrefix; syncPhase(); return }
         let hints = lineAttempts[currentLineIndex]?.hints ?? 1
         revealedLength = hints >= 3 ? target.count : max(revealedLength, CodeTokens.revealEnd(in: target, from: max(typedPrefix, revealedLength)))
         if revealedLength >= target.count { lineAttempts[currentLineIndex]?.revealed = true }
+        syncPhase()
     }
 
     private func resetInput() {
         editorText = ""
+        bufferResetToken &+= 1
         lastKeyboardType = nil
         hintOffset = nil
         submitFeedback = nil
@@ -293,36 +349,167 @@ final class TypingScreenViewModel: ObservableObject {
         }))
         lastSummary = summary
         if mode.isGraded { weakLineIndices = weakLineIndices.subtracting(summary.cleanLines).union(summary.weakLines) }
+        syncPhase()
     }
 
     /// An optional rating of the finished graded attempt; it can be changed.
     func rate(_ rating: SelfRating) {
         guard isComplete, lastSummary?.mode.isGraded == true else { return }
         selfRating = rating
+        syncPhase()
     }
 
     private func rebuildPracticeLines(keepingPosition: Bool = false) {
         if let hunt = bugHunt {
             practiceLines = hunt.phase == .finding ? [] : [PracticeLine(sourceIndex: hunt.bugLine, text: hunt.originalLine)]
-            return restart()
+            restart()
+            return
         }
         let anchor = keepingPosition && hasPracticeLines && !isComplete ? currentLineIndex : nil
         // Graded modes keep comments visible as cues and never type them.
         let code = CommentFilter.lines(lines, language: language, skippingComments: skipComments || mode.isGraded)
             .filter { !scaffoldLineIndices.contains($0.sourceIndex) }
         practiceLines = PracticeLineSelection.lines(for: mode, from: code, keyLines: lesson?.keyLineIndices ?? [], weakLines: weakLineIndices)
-        guard let anchor, let position = practiceLines.firstIndex(where: { $0.sourceIndex >= anchor }) else { return restart() }
+        guard let anchor, let position = practiceLines.firstIndex(where: { $0.sourceIndex >= anchor }) else {
+            restart()
+            return
+        }
         practicePosition = position
         revealedLength = 0
         resetInput()
+        syncPhase()
     }
 
     func restart() {
+        cleanLineCount = 0
+        currentLineHadError = false
+        sessionStartTime = Date()
         practicePosition = 0
         lineAttempts = [:]
         revealedLength = 0
         lastSummary = nil
         selfRating = nil
         resetInput()
+        syncPhase()
+    }
+
+    // MARK: - State Machine Synchronization & Reducer
+
+    public func syncPhase() {
+        if isComplete {
+            let elapsed = Date().timeIntervalSince(sessionStartTime)
+            let ratingValue = selfRating?.rawValue
+            phase = .completed(SessionReport(
+                totalLines: practiceLines.count,
+                cleanLines: cleanLineCount,
+                durationSeconds: elapsed,
+                selfRating: ratingValue
+            ))
+            return
+        }
+        if let hunt = bugHunt {
+            phase = .bugHunt(BugHuntState(
+                plantedLineIndex: hunt.bugLine,
+                selectedLineIndex: hunt.wrongGuesses.last,
+                attemptsRemaining: max(0, 3 - hunt.wrongGuesses.count),
+                isResolved: hunt.phase == .solved
+            ))
+            return
+        }
+        if let pair = contrast {
+            phase = .contrast(ContrastState(
+                variantALines: pair.base.sourceLines,
+                variantBLines: pair.variant.sourceLines,
+                currentDiffIndex: practicePosition
+            ))
+            return
+        }
+        let subMode: PracticeSubMode
+        switch mode {
+        case .copy: subMode = .copy
+        case .keyLines: subMode = .keyLines
+        case .recall: subMode = .recall
+        }
+        let isBlankLine = hasPracticeLines && currentLine.isEmpty
+        let result = LineDiff.evaluate(
+            target: PreparedTargetLine(rawLine: currentLine),
+            typed: editorText,
+            tolerance: diffTolerance
+        )
+        let lineComplete = isBlankLine || (hasPracticeLines && result.isComplete)
+        let progress = LineProgress(
+            matchedCount: result.matchedTargetCharacters,
+            errorUTF16Range: lineComplete ? nil : result.errorUTF16Range,
+            isLineComplete: lineComplete,
+            isRevealedByReturn: revealedLength > 0
+        )
+        phase = .typing(subMode: subMode, currentLineIndex: practicePosition, lineProgress: progress)
+    }
+
+    public func send(_ action: PracticeAction) {
+        switch (phase, action) {
+        case (var .typing(subMode, lineIndex, progress), let .editorProgressChanged(matched, errorRange, isComplete)):
+            progress.matchedCount = matched
+            progress.errorUTF16Range = errorRange
+            progress.isLineComplete = isComplete
+            if errorRange != nil {
+                currentLineHadError = true
+            }
+            self.phase = .typing(subMode: subMode, currentLineIndex: lineIndex, lineProgress: progress)
+
+        case (var .typing(subMode, lineIndex, progress), .commitLineOnReturn):
+            if subMode == .recall && !progress.isLineComplete && !progress.isRevealedByReturn {
+                revealHint()
+                progress.isRevealedByReturn = true
+                self.phase = .typing(subMode: subMode, currentLineIndex: lineIndex, lineProgress: progress)
+                return
+            }
+            if !progress.isLineComplete {
+                lineAttempts[currentLineIndex, default: LineAttempt()].wrongSubmits += 1
+                if let errRange = progress.errorUTF16Range {
+                    submitFeedback = "Not quite: the first difference is at character \(errRange.location + 1)."
+                } else if progress.matchedCount < currentLine.count {
+                    submitFeedback = "So far so good. The line continues."
+                } else {
+                    submitFeedback = SubmitFeedback.message(typed: editorText, target: currentLine,
+                                                            explanation: lesson?.knownMistake(on: currentLineIndex, typed: editorText)?.explanation)
+                }
+                syncPhase()
+                return
+            }
+            advanceLine()
+
+        case (.typing, let .selectSubMode(newSubMode)):
+            let targetMode: PracticeMode
+            switch newSubMode {
+            case .copy: targetMode = .copy
+            case .keyLines: targetMode = .keyLines
+            case .recall: targetMode = .recall
+            }
+            setMode(targetMode)
+
+        case (var .bugHunt(state), let .selectBugLine(selectedLine)):
+            guard !state.isResolved && state.attemptsRemaining > 0 else { return }
+            selectReferenceLine(selectedLine)
+            state.selectedLineIndex = selectedLine
+            if let hunt = bugHunt {
+                state.isResolved = hunt.phase == .solved
+                state.attemptsRemaining = max(0, 3 - hunt.wrongGuesses.count)
+            }
+            self.phase = .bugHunt(state)
+
+        case (var .completed(report), let .rateSession(rating)):
+            if let r = SelfRating(rawValue: rating) {
+                rate(r)
+                report.selfRating = rating
+                self.phase = .completed(report)
+            }
+
+        case (_, .restartLesson):
+            restart()
+
+        default:
+            break
+        }
     }
 }

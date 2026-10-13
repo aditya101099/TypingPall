@@ -3,6 +3,7 @@ import Combine
 
 /// Accuracy describes the current input; WPM uses correct characters / 5.
 /// A monotonic clock avoids changes caused by wall-clock adjustments.
+@MainActor
 final class TypingStatistics: ObservableObject {
     @Published private(set) var wpm = 0.0
     @Published private(set) var accuracy = 100.0

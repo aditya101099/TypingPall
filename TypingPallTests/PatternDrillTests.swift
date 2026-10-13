@@ -33,6 +33,7 @@ final class BugHuntTests: XCTestCase {
     }
 }
 
+@MainActor
 final class BugHuntPracticeTests: XCTestCase {
     func testHuntShowsTheBugThenPracticesOnlyTheFix() throws {
         let name = UUID().uuidString
@@ -63,6 +64,7 @@ final class BugHuntPracticeTests: XCTestCase {
     }
 }
 
+@MainActor
 final class ContrastPairTests: XCTestCase {
     private let lower = "# Exclude mid only when its value is too small.\ndef lower_bound(values, target):\n    left, right = 0, len(values)\n    while left < right:\n        mid = left + (right - left) // 2\n        if values[mid] < target:\n            left = mid + 1\n        else:\n            right = mid\n    return left"
     private var upper: String {

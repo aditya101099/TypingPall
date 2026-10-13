@@ -9,7 +9,7 @@ extension XCTestCase {
     }
 }
 
-final class LineDiffTests: XCTestCase {
+final class LegacyLineDiffTests: XCTestCase {
     func testCorrectPrefixHasNoMismatch() {
         let diff = LineDiff(typed: "int le", target: "int left = 0;")
         XCTAssertNil(diff.firstMismatch); XCTAssertNil(diff.mismatchRange)
@@ -42,8 +42,64 @@ final class LineDiffTests: XCTestCase {
         XCTAssertTrue(LineDiff(typed: "", target: "").isMatch)
         XCTAssertTrue(LineDiff(typed: "a = 1", target: "a = 1").isMatch)
     }
+
+    func testPreparedTargetLineAndCanonicalEquivalence() {
+        let cases = [
+            ("let café = 1", "let cafe\u{301} = 1"),
+            ("const naïve = true;", "const nai\u{308}ve = true;"),
+            ("// résumé", "// re\u{301}sume\u{301}")
+        ]
+        for (expected, typed) in cases {
+            let target = PreparedTargetLine(rawLine: expected)
+            let result = LineDiff.evaluate(target: target, typed: typed, tolerance: .strictCharacter)
+            XCTAssertNil(result.errorUTF16Range, "Mismatch in canonical equivalence for \(expected) vs \(typed)")
+            XCTAssertTrue(result.isComplete)
+        }
+    }
+
+    func testSyntaxAwareTriviaMatching() {
+        let target = PreparedTargetLine(rawLine: "    int left = 0, right = n - 1;")
+        let compactTyped = "int left=0,right=n-1;"
+
+        let strictResult = LineDiff.evaluate(target: target, typed: compactTyped, tolerance: .strictCharacter)
+        XCTAssertNotNil(strictResult.errorUTF16Range)
+
+        let relaxedResult = LineDiff.evaluate(target: target, typed: compactTyped, tolerance: .syntaxAwareTrivia)
+        XCTAssertNil(relaxedResult.errorUTF16Range)
+        XCTAssertTrue(relaxedResult.isComplete)
+
+        // Ensure spaces inside string literals are NEVER collapsed
+        let stringTarget = PreparedTargetLine(rawLine: #"print("hello  world")"#)
+        let wrongStringTyped = #"print("hello world")"#
+        let stringResult = LineDiff.evaluate(target: stringTarget, typed: wrongStringTyped, tolerance: .syntaxAwareTrivia)
+        XCTAssertNotNil(stringResult.errorUTF16Range)
+    }
+
+    func testFuzzUTF16BoundsSafety() {
+        let fragments = ["func ", "é", "e\u{301}", "👨‍👩‍👧‍👦", "🏳️‍🌈", "🚀", "int a = 0;", "漢字", "\u{200B}"]
+        var rng = SystemRandomNumberGenerator()
+
+        for _ in 0..<500 {
+            let expectedRaw = (0..<Int.random(in: 0...8, using: &rng))
+                .map { _ in fragments.randomElement(using: &rng)! }
+                .joined()
+            let typedRaw = (0..<Int.random(in: 0...8, using: &rng))
+                .map { _ in fragments.randomElement(using: &rng)! }
+                .joined()
+
+            let target = PreparedTargetLine(rawLine: expectedRaw)
+            let result = LineDiff.evaluate(target: target, typed: typedRaw)
+
+            if let errorRange = result.errorUTF16Range {
+                let utf16Length = (typedRaw as NSString).length
+                XCTAssertGreaterThanOrEqual(errorRange.location, 0)
+                XCTAssertLessThanOrEqual(NSMaxRange(errorRange), utf16Length)
+            }
+        }
+    }
 }
 
+@MainActor
 final class PracticeScreenModelTests: XCTestCase {
     func testReferenceRowsFlagCurrentAndSkippedLines() throws {
         let model = TypingScreenViewModel(defaults: makeDefaults())

@@ -166,6 +166,7 @@ final class LibrarySectionTests: XCTestCase {
     }
 }
 
+@MainActor
 final class ScaffoldPracticeTests: XCTestCase {
     private func makeModel() throws -> TypingScreenViewModel {
         let name = UUID().uuidString

@@ -51,6 +51,7 @@ struct TypingPallApp: App {
                 if persistence.isReady {
                     TypingScreenView()
                         .environment(\.managedObjectContext, persistence.container.viewContext)
+                        .environment(\.persistenceRepository, PersistenceRepository(container: persistence.container))
                 } else if let error = persistence.loadError {
                     VStack(spacing: 16) {
                         Image(systemName: "externaldrive.badge.exclamationmark").font(.largeTitle)

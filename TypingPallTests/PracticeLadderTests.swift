@@ -77,6 +77,7 @@ final class PracticeLadderTests: XCTestCase {
     }
 }
 
+@MainActor
 private func freshModel(for test: XCTestCase) throws -> TypingScreenViewModel {
     let name = UUID().uuidString
     test.addTeardownBlock { UserDefaults().removePersistentDomain(forName: name) }
@@ -88,6 +89,7 @@ private let windowLesson = PracticeLesson(id: "w", title: "W", category: "C", tr
     invariant: "text[left:right + 1] has no repeat.", keyLineIndices: [5, 6],
     mutations: [LessonMutation(line: 5, replacement: "        left = seen.get(char, -1) + 1", explanation: "Without max(), left can move backwards.")])
 
+@MainActor
 final class PracticeModeTests: XCTestCase {
     func testModesChooseTypedLinesAndMaskOnlyUnfinishedOnes() throws {
         let model = try freshModel(for: self)
@@ -183,6 +185,7 @@ final class PracticeModeTests: XCTestCase {
     }
 }
 
+@MainActor
 extension EditorRegressionTests {
     func testHiddenModesUnderlineOnlyAfterReturnUntilTheNextEdit() {
         var submissions = 0

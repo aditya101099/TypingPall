@@ -63,6 +63,7 @@ struct TextKit2TypingEditor: NSViewRepresentable {
     }
 }
 
+@MainActor
 final class TextKit2Coordinator: NSObject, NSTextViewDelegate {
     var parent: TextKit2TypingEditor
     weak var textView: NSTextView?

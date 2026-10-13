@@ -1,8 +1,8 @@
 import Foundation
 
-struct LessonAnchor: Codable, Hashable { let name: String; let trick: String }
-struct LessonComplexity: Codable, Hashable { let time: String; let space: String }
-struct LessonMutation: Codable, Hashable { let line: Int; let replacement: String; let explanation: String }
+struct LessonAnchor: Codable, Hashable, Sendable { let name: String; let trick: String }
+struct LessonComplexity: Codable, Hashable, Sendable { let time: String; let space: String }
+struct LessonMutation: Codable, Hashable, Sendable { let line: Int; let replacement: String; let explanation: String }
 
 extension PracticeLesson {
     var sourceLines: [String] { code.components(separatedBy: "\n") }
