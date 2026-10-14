@@ -85,6 +85,25 @@ struct AttemptOutcomeView: View {
                 .background(Color.accentColor.opacity(0.08))
                 .cornerRadius(8)
             }
+
+            if let summary = viewModel.lastSummary, !summary.weakLines.isEmpty {
+                HStack(spacing: 8) {
+                    Image(systemName: "bolt.badge.clock")
+                        .foregroundColor(TypingPalette.statusCorrected)
+                    Text("Struggled on \(summary.weakLines.count) lines.")
+                        .font(.callout)
+                    Spacer()
+                    Button("Drill \(summary.weakLines.count) Shaky Lines (⌘R)") {
+                        viewModel.drillShakyLines()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(TypingPalette.statusCorrected)
+                    .accessibilityIdentifier("drillShakyLines")
+                }
+                .padding(10)
+                .background(TypingPalette.statusCorrected.opacity(0.12))
+                .cornerRadius(8)
+            }
         }
     }
 

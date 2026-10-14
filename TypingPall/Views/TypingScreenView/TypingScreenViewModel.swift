@@ -349,6 +349,20 @@ final class TypingScreenViewModel: ObservableObject {
         }))
         lastSummary = summary
         if mode.isGraded { weakLineIndices = weakLineIndices.subtracting(summary.cleanLines).union(summary.weakLines) }
+
+        let id = currentLessonID ?? placeholderText
+        let record = MasteryStore.shared.record(for: id)
+        let updatedRecord = RecallDecayScheduler.evaluate(
+            patternID: id,
+            currentRecord: record,
+            mode: mode,
+            cleanLinesCount: summary.cleanLines.count,
+            totalLinesCount: summary.lines.count,
+            hintsUsed: summary.hints,
+            selfRating: selfRating
+        )
+        MasteryStore.shared.update(record: updatedRecord)
+
         syncPhase()
     }
 
@@ -356,7 +370,30 @@ final class TypingScreenViewModel: ObservableObject {
     func rate(_ rating: SelfRating) {
         guard isComplete, lastSummary?.mode.isGraded == true else { return }
         selfRating = rating
+        if let summary = lastSummary {
+            let id = currentLessonID ?? placeholderText
+            let record = MasteryStore.shared.record(for: id)
+            let updatedRecord = RecallDecayScheduler.evaluate(
+                patternID: id,
+                currentRecord: record,
+                mode: mode,
+                cleanLinesCount: summary.cleanLines.count,
+                totalLinesCount: summary.lines.count,
+                hintsUsed: summary.hints,
+                selfRating: rating
+            )
+            MasteryStore.shared.update(record: updatedRecord)
+        }
         syncPhase()
+    }
+
+    /// Drill only the shaky/unclean lines from the last attempt in Recall mode
+    func drillShakyLines() {
+        guard let summary = lastSummary, !summary.weakLines.isEmpty else { return }
+        weakLineIndices = summary.weakLines
+        mode = .recall
+        rebuildPracticeLines()
+        restart()
     }
 
     private func rebuildPracticeLines(keepingPosition: Bool = false) {

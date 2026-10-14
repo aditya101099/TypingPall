@@ -51,6 +51,14 @@
 		C30000000000000000000012 /* BugHuntBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = C30000000000000000000011 /* BugHuntBanner.swift */; };
 		C30000000000000000000014 /* ContrastReferenceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C30000000000000000000013 /* ContrastReferenceView.swift */; };
 		C30000000000000000000016 /* PatternDrillTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C30000000000000000000015 /* PatternDrillTests.swift */; };
+		C90000000000000000000002 /* TypingPall/Utils/TypingPalette.swift in Sources */ = {isa = PBXBuildFile; fileRef = C90000000000000000000001 /* TypingPall/Utils/TypingPalette.swift */; };
+		CA0000000000000000000002 /* TypingPall/Models/MasteryTelemetry.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA0000000000000000000001 /* TypingPall/Models/MasteryTelemetry.swift */; };
+		CB0000000000000000000002 /* InterleavedCodeCanvasView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB0000000000000000000001 /* InterleavedCodeCanvasView.swift */; };
+		CC0000000000000000000002 /* TypingPall/Views/Workspace/CurriculumSidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC0000000000000000000001 /* TypingPall/Views/Workspace/CurriculumSidebarView.swift */; };
+		CD0000000000000000000002 /* TypingPall/Views/Workspace/QuickSwitcherOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0000000000000000000001 /* TypingPall/Views/Workspace/QuickSwitcherOverlay.swift */; };
+		CE0000000000000000000002 /* TypingPall/Views/Workspace/TheoryInspectorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000001 /* TypingPall/Views/Workspace/TheoryInspectorView.swift */; };
+		CF0000000000000000000002 /* SymbolErgonomicsStripView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF0000000000000000000001 /* SymbolErgonomicsStripView.swift */; };
+		D10000000000000000000002 /* MasteryTelemetryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000001 /* MasteryTelemetryTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -124,6 +132,14 @@
 		C60000000000000000000001 /* TypingPall/PersistenceRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TypingPall/PersistenceRepository.swift; sourceTree = SOURCE_ROOT; };
 		C70000000000000000000001 /* PersistenceRepositoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceRepositoryTests.swift; sourceTree = "<group>"; };
 		C80000000000000000000001 /* DrillStateMachineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DrillStateMachineTests.swift; sourceTree = "<group>"; };
+		C90000000000000000000001 /* TypingPall/Utils/TypingPalette.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TypingPall/Utils/TypingPalette.swift; sourceTree = SOURCE_ROOT; };
+		CA0000000000000000000001 /* TypingPall/Models/MasteryTelemetry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TypingPall/Models/MasteryTelemetry.swift; sourceTree = SOURCE_ROOT; };
+		CB0000000000000000000001 /* InterleavedCodeCanvasView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterleavedCodeCanvasView.swift; sourceTree = "<group>"; };
+		CC0000000000000000000001 /* TypingPall/Views/Workspace/CurriculumSidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TypingPall/Views/Workspace/CurriculumSidebarView.swift; sourceTree = SOURCE_ROOT; };
+		CD0000000000000000000001 /* TypingPall/Views/Workspace/QuickSwitcherOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TypingPall/Views/Workspace/QuickSwitcherOverlay.swift; sourceTree = SOURCE_ROOT; };
+		CE0000000000000000000001 /* TypingPall/Views/Workspace/TheoryInspectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TypingPall/Views/Workspace/TheoryInspectorView.swift; sourceTree = SOURCE_ROOT; };
+		CF0000000000000000000001 /* SymbolErgonomicsStripView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SymbolErgonomicsStripView.swift; sourceTree = "<group>"; };
+		D10000000000000000000001 /* MasteryTelemetryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MasteryTelemetryTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -157,6 +173,7 @@
 				7DCAA2A72A5F340100AFC118 /* TypingScreenView.swift */,
 				7D76E1942A6FBC7F00D76E59 /* TypingScreenViewModel.swift */,
 				C10000000000000000000005 /* ReferenceCodeView.swift */,
+				CB0000000000000000000001 /* InterleavedCodeCanvasView.swift */,
 				C10000000000000000000007 /* PracticeInputPanel.swift */,
 				C1000000000000000000000B /* PracticeOptionsPopover.swift */,
 				C10000000000000000000009 /* CompletionCard.swift */,
@@ -223,6 +240,7 @@
 				C3000000000000000000000F /* TypingPall/Models/ContrastPair.swift */,
 				A10000000000000000000004 /* TypingPall/Views/TypingStatisticsView.swift */,
 				A10000000000000000000002 /* TypingPall/Models/TypingStatistics.swift */,
+				CA0000000000000000000001 /* TypingPall/Models/MasteryTelemetry.swift */,
 				7DCAA2842A5F33D700AFC118 /* TypingPall.entitlements */,
 				7DCAA2812A5F33D700AFC118 /* TypingPall.xcdatamodeld */,
 				B5CE24732A9780D100383369 /* TypingPall.xctestplan */,
@@ -255,6 +273,7 @@
 				C50000000000000000000001 /* LineDiffTests.swift */,
 				C70000000000000000000001 /* PersistenceRepositoryTests.swift */,
 				C80000000000000000000001 /* DrillStateMachineTests.swift */,
+				D10000000000000000000001 /* MasteryTelemetryTests.swift */,
 			);
 			path = TypingPallTests;
 			sourceTree = "<group>";
@@ -273,6 +292,10 @@
 				7DC1508E2A7D3D2700AE7358 /* Setting */,
 				7D76E1962A6FBE4F00D76E59 /* Editor */,
 				7D76E1932A6FBC6E00D76E59 /* TypingScreenView */,
+				CF0000000000000000000001 /* SymbolErgonomicsStripView.swift */,
+				CC0000000000000000000001 /* TypingPall/Views/Workspace/CurriculumSidebarView.swift */,
+				CD0000000000000000000001 /* TypingPall/Views/Workspace/QuickSwitcherOverlay.swift */,
+				CE0000000000000000000001 /* TypingPall/Views/Workspace/TheoryInspectorView.swift */,
 				7DCAA2AA2A5FEC8800AFC118 /* KeyboardLayoutView.swift */,
 				7DCAA2B02A5FF5C700AFC118 /* HistoryUploadsView.swift */,
 				C30000000000000000000003 /* LessonNotesView.swift */,
@@ -285,6 +308,7 @@
 			isa = PBXGroup;
 			children = (
 				7DCAA2B32A60024A00AFC118 /* String+Utils.swift */,
+				C90000000000000000000001 /* TypingPall/Utils/TypingPalette.swift */,
 			);
 			path = Utils;
 			sourceTree = "<group>";
@@ -451,6 +475,13 @@
 				C30000000000000000000014 /* ContrastReferenceView.swift in Sources */,
 				C40000000000000000000002 /* TypingPall/Models/DrillState.swift in Sources */,
 				C60000000000000000000002 /* TypingPall/PersistenceRepository.swift in Sources */,
+				C90000000000000000000002 /* TypingPall/Utils/TypingPalette.swift in Sources */,
+				CA0000000000000000000002 /* TypingPall/Models/MasteryTelemetry.swift in Sources */,
+				CB0000000000000000000002 /* InterleavedCodeCanvasView.swift in Sources */,
+				CC0000000000000000000002 /* TypingPall/Views/Workspace/CurriculumSidebarView.swift in Sources */,
+				CD0000000000000000000002 /* TypingPall/Views/Workspace/QuickSwitcherOverlay.swift in Sources */,
+				CE0000000000000000000002 /* TypingPall/Views/Workspace/TheoryInspectorView.swift in Sources */,
+				CF0000000000000000000002 /* SymbolErgonomicsStripView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -467,6 +498,7 @@
 				C50000000000000000000002 /* LineDiffTests.swift in Sources */,
 				C70000000000000000000002 /* PersistenceRepositoryTests.swift in Sources */,
 				C80000000000000000000002 /* DrillStateMachineTests.swift in Sources */,
+				D10000000000000000000002 /* MasteryTelemetryTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -545,7 +577,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 12.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -600,7 +632,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 12.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = macosx;
@@ -629,7 +661,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 12.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.mier.TypingPall;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -658,7 +690,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 12.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.mier.TypingPall;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -676,7 +708,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 12.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.mier.TypingPallTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -695,7 +727,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 12.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.mier.TypingPallTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -714,7 +746,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 12.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.mier.TypingPallUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -733,7 +765,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 12.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.mier.TypingPallUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";

@@ -81,13 +81,18 @@ public final class TextKit2TypingView: NSView, NSTextViewDelegate {
 
     // MARK: - External State Synchronization
 
-    public func configure(targetLine: String, resetToken: UInt64, fontSize: CGFloat, isEnabled: Bool = true, diffTolerance: DiffTolerance = .strictCharacter) {
+    public func configure(targetLine: String, resetToken: UInt64, fontSize: CGFloat, isEnabled: Bool = true, diffTolerance: DiffTolerance = .strictCharacter, indentPadding: CGFloat = 16) {
         self.isEnabled = isEnabled
         self.diffTolerance = diffTolerance
 
         let safeSize = min(30, max(12, fontSize))
         if textView.font?.pointSize != safeSize {
             textView.font = NSFont.monospacedSystemFont(ofSize: safeSize, weight: .regular)
+        }
+
+        let effectiveInset = max(16, indentPadding)
+        if textView.textContainerInset.width != effectiveInset {
+            textView.textContainerInset = NSSize(width: effectiveInset, height: 8)
         }
 
         if preparedTarget.rawLine != targetLine {
@@ -102,6 +107,16 @@ public final class TextKit2TypingView: NSView, NSTextViewDelegate {
             textView.string = ""
             clearRenderingAttributes()
         }
+    }
+
+    public func triggerErrorShake() {
+        let animation = CAKeyframeAnimation(keyPath: "position.x")
+        animation.values = [0, -4, 4, -3, 3, 0]
+        animation.keyTimes = [0, 0.2, 0.4, 0.6, 0.8, 1.0]
+        animation.duration = 0.18
+        animation.isAdditive = true
+        animation.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        layer?.add(animation, forKey: "shake")
     }
 
     // MARK: - NSTextViewDelegate (Hot Keystroke Path)
@@ -167,15 +182,15 @@ public final class TextKit2TypingView: NSView, NSTextViewDelegate {
         // 1. Reset existing rendering attributes across the single-line document
         textLayoutManager.setRenderingAttributes([:], for: documentRange)
 
-        // 2. If a mismatch exists, convert UTF-16 NSRange -> NSTextRange and apply ephemeral red tint
+        // 2. If a mismatch exists, convert UTF-16 NSRange -> NSTextRange and apply ephemeral warm coral tint
         if let nsErrorRange = errorRange,
            nsErrorRange.length > 0,
            let textRange = makeTextRange(from: nsErrorRange) {
             let errorAttributes: [NSAttributedString.Key: Any] = [
-                .foregroundColor: NSColor.systemRed,
-                .backgroundColor: NSColor.systemRed.withAlphaComponent(0.18),
+                .foregroundColor: TypingPalette.nsErrorUnderline,
+                .backgroundColor: TypingPalette.nsErrorBackgroundTint,
                 .underlineStyle: NSUnderlineStyle.single.rawValue,
-                .underlineColor: NSColor.systemRed
+                .underlineColor: TypingPalette.nsErrorUnderline
             ]
             textLayoutManager.setRenderingAttributes(errorAttributes, for: textRange)
         }
@@ -201,17 +216,20 @@ public struct TextKit2TypingViewWrapper: NSViewRepresentable {
     public var resetToken: UInt64
     public var fontSize: CGFloat
     public var diffTolerance: DiffTolerance = .strictCharacter
+    public var indentPadding: CGFloat = 16
     public var isEnabled: Bool = true
     public var onProgress: ((DiffResult) -> Void)?
     public var onReturn: (() -> Void)?
 
     public init(targetLine: String, resetToken: UInt64 = 0, fontSize: CGFloat = 16,
-                diffTolerance: DiffTolerance = .strictCharacter, isEnabled: Bool = true,
+                diffTolerance: DiffTolerance = .strictCharacter, indentPadding: CGFloat = 16,
+                isEnabled: Bool = true,
                 onProgress: ((DiffResult) -> Void)? = nil, onReturn: (() -> Void)? = nil) {
         self.targetLine = targetLine
         self.resetToken = resetToken
         self.fontSize = fontSize
         self.diffTolerance = diffTolerance
+        self.indentPadding = indentPadding
         self.isEnabled = isEnabled
         self.onProgress = onProgress
         self.onReturn = onReturn
@@ -225,7 +243,7 @@ public struct TextKit2TypingViewWrapper: NSViewRepresentable {
         let view = TextKit2TypingView()
         view.delegate = context.coordinator
         view.configure(targetLine: targetLine, resetToken: resetToken, fontSize: fontSize,
-                       isEnabled: isEnabled, diffTolerance: diffTolerance)
+                       isEnabled: isEnabled, diffTolerance: diffTolerance, indentPadding: indentPadding)
         return view
     }
 
@@ -233,7 +251,7 @@ public struct TextKit2TypingViewWrapper: NSViewRepresentable {
         context.coordinator.onProgress = onProgress
         context.coordinator.onReturn = onReturn
         nsView.configure(targetLine: targetLine, resetToken: resetToken, fontSize: fontSize,
-                         isEnabled: isEnabled, diffTolerance: diffTolerance)
+                         isEnabled: isEnabled, diffTolerance: diffTolerance, indentPadding: indentPadding)
     }
 
     @MainActor

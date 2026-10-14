@@ -1,0 +1,218 @@
+import SwiftUI
+
+public enum SidebarSelection: Hashable {
+    case smartCollection(SmartFilter)
+    case drill(DrillDestination)
+    case lesson(String)
+}
+
+public enum SmartFilter: String, CaseIterable, Identifiable {
+    case dueForRecall = "Due for Recall"
+    case allPatterns = "All Patterns"
+    case leetcode = "LeetCode"
+    case lld = "Low-Level Design"
+    case myScripts = "My Scripts"
+
+    public var id: String { rawValue }
+
+    public var icon: String {
+        switch self {
+        case .dueForRecall: return "clock.badge.checkmark"
+        case .allPatterns: return "books.vertical"
+        case .leetcode: return "brain.head.profile"
+        case .lld: return "slider.horizontal.3"
+        case .myScripts: return "doc.text"
+        }
+    }
+}
+
+public enum DrillDestination: String, CaseIterable, Identifiable {
+    case whichPattern = "Which Pattern?"
+    case bugHunt = "Bug Hunt"
+
+    public var id: String { rawValue }
+
+    public var icon: String {
+        switch self {
+        case .whichPattern: return "questionmark.circle"
+        case .bugHunt: return "ladybug"
+        }
+    }
+}
+
+struct CurriculumSidebarView: View {
+    @ObservedObject var viewModel: TypingScreenViewModel
+    @ObservedObject var masteryStore = MasteryStore.shared
+
+    @Binding var selection: SidebarSelection?
+    @Binding var activeSmartFilter: SmartFilter
+    @Binding var selectedDrill: DrillDestination?
+
+    @State private var searchQuery = ""
+    @State private var isShowingAddScript = false
+
+    var onSelectLesson: (PracticeLesson) -> Void
+    var onSelectBugHunt: (PracticeLesson) -> Void
+    var onSelectDrill: (DrillDestination) -> Void
+    var onAddScript: () -> Void
+
+    init(
+        viewModel: TypingScreenViewModel,
+        selection: Binding<SidebarSelection?>,
+        activeSmartFilter: Binding<SmartFilter>,
+        selectedDrill: Binding<DrillDestination?>,
+        onSelectLesson: @escaping (PracticeLesson) -> Void,
+        onSelectBugHunt: @escaping (PracticeLesson) -> Void,
+        onSelectDrill: @escaping (DrillDestination) -> Void,
+        onAddScript: @escaping () -> Void
+    ) {
+        self.viewModel = viewModel
+        self._selection = selection
+        self._activeSmartFilter = activeSmartFilter
+        self._selectedDrill = selectedDrill
+        self.onSelectLesson = onSelectLesson
+        self.onSelectBugHunt = onSelectBugHunt
+        self.onSelectDrill = onSelectDrill
+        self.onAddScript = onAddScript
+    }
+
+    private var allLessons: [PracticeLesson] { PracticeCatalog.lessons }
+
+    private var filteredLessons: [PracticeLesson] {
+        let base: [PracticeLesson]
+        switch activeSmartFilter {
+        case .dueForRecall:
+            let dueIDs = masteryStore.dueForRecallPatternIDs()
+            base = allLessons.filter { dueIDs.contains($0.id) }
+        case .allPatterns:
+            base = allLessons
+        case .leetcode:
+            base = allLessons.filter { $0.track == .algorithms }
+        case .lld:
+            base = allLessons.filter { $0.track == .systemDesign }
+        case .myScripts:
+            base = []
+        }
+
+        let query = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !query.isEmpty else { return base }
+        return base.filter {
+            $0.title.localizedCaseInsensitiveContains(query) ||
+            $0.language.title.localizedCaseInsensitiveContains(query) ||
+            $0.category.localizedCaseInsensitiveContains(query)
+        }
+    }
+
+    public var body: some View {
+        List(selection: $selection) {
+            // Search field
+            Section {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundColor(.secondary)
+                        .font(.caption)
+                    TextField("Filter patterns…", text: $searchQuery)
+                        .textFieldStyle(.plain)
+                        .font(.callout)
+                }
+                .padding(.vertical, 4)
+            }
+
+            // Smart Collections
+            Section(header: Text("CURRICULUM").font(.caption2).fontWeight(.bold).foregroundColor(.secondary)) {
+                ForEach(SmartFilter.allCases) { filter in
+                    HStack {
+                        Label(filter.rawValue, systemImage: filter.icon)
+                            .foregroundColor(filter == .dueForRecall && masteryStore.dueForRecallCount > 0 ? Color.orange : .primary)
+
+                        Spacer()
+
+                        if filter == .dueForRecall {
+                            let count = masteryStore.dueForRecallCount
+                            if count > 0 {
+                                Text("\(count)")
+                                    .font(.caption2.bold())
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(Color.orange)
+                                    .clipShape(Capsule())
+                            }
+                        }
+                    }
+                    .tag(SidebarSelection.smartCollection(filter))
+                }
+            }
+
+            // Dedicated Practice Drills
+            Section(header: Text("PRACTICE DRILLS").font(.caption2).fontWeight(.bold).foregroundColor(.secondary)) {
+                ForEach(DrillDestination.allCases) { drill in
+                    HStack {
+                        Label(drill.rawValue, systemImage: drill.icon)
+                            .foregroundColor(drill == .bugHunt ? .orange : Color.accentColor)
+                        Spacer()
+                    }
+                    .tag(SidebarSelection.drill(drill))
+                }
+            }
+
+            // Patterns List under selected Smart Filter
+            Section(header: Text(activeSmartFilter.rawValue.uppercased()).font(.caption2).fontWeight(.bold).foregroundColor(.secondary)) {
+                if filteredLessons.isEmpty {
+                    Text(activeSmartFilter == .dueForRecall ? "All patterns fresh! No recall due." : "No patterns found.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .padding(.vertical, 4)
+                } else {
+                    ForEach(filteredLessons) { lesson in
+                        let level = masteryStore.level(for: lesson.id)
+                        let isDue = masteryStore.isDueForRecall(patternID: lesson.id)
+
+                        HStack(spacing: 8) {
+                            TriRingMasteryGlyph(level: level, isDueForRecall: isDue, size: 14)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(lesson.title)
+                                    .font(.system(size: 13, weight: .medium))
+                                    .lineLimit(1)
+                                Text(lesson.language.title)
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+
+                            Spacer()
+
+                            if !(lesson.mutations ?? []).isEmpty {
+                                Image(systemName: "ladybug")
+                                    .font(.system(size: 10))
+                                    .foregroundColor(.orange.opacity(0.8))
+                                    .help("Has Bug Hunt")
+                            }
+                        }
+                        .padding(.vertical, 3)
+                        .tag(SidebarSelection.lesson(lesson.id))
+                    }
+                }
+            }
+        }
+        .listStyle(.sidebar)
+        .frame(minWidth: 220, idealWidth: 250, maxWidth: 280)
+        .onChange(of: selection) { newSelection in
+            switch newSelection {
+            case .smartCollection(let filter):
+                activeSmartFilter = filter
+                selectedDrill = nil
+            case .drill(let drill):
+                selectedDrill = drill
+                onSelectDrill(drill)
+            case .lesson(let id):
+                if let lesson = allLessons.first(where: { $0.id == id }) {
+                    selectedDrill = nil
+                    onSelectLesson(lesson)
+                }
+            case nil:
+                break
+            }
+        }
+    }
+}

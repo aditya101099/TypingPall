@@ -125,22 +125,22 @@ enum CodeHighlighter {
 
         let trimmed = code.trimmingCharacters(in: .whitespaces)
         if trimmed.hasPrefix("//") || trimmed.hasPrefix("#") || trimmed.hasPrefix("--") {
-            attributed.foregroundColor = .secondary
+            attributed.foregroundColor = TypingPalette.syntaxComment
             return attributed
         }
 
         let kw = keywords(for: language)
         let tp = types(for: language)
 
-        highlightPattern(in: &attributed, text: code, pattern: "\"[^\"]*\"|'[^']*'", color: Color.orange)
-        highlightPattern(in: &attributed, text: code, pattern: "\\b\\d+(\\.\\d+)?\\b", color: Color.teal)
+        highlightPattern(in: &attributed, text: code, pattern: "\"[^\"]*\"|'[^']*'", color: TypingPalette.syntaxString)
+        highlightPattern(in: &attributed, text: code, pattern: "\\b\\d+(\\.\\d+)?\\b", color: TypingPalette.syntaxNumber)
 
         for keyword in kw {
-            highlightWord(in: &attributed, text: code, word: keyword, color: Color.purple)
+            highlightWord(in: &attributed, text: code, word: keyword, color: TypingPalette.syntaxKeyword)
         }
 
         for typeName in tp {
-            highlightWord(in: &attributed, text: code, word: typeName, color: Color.blue)
+            highlightWord(in: &attributed, text: code, word: typeName, color: TypingPalette.syntaxType)
         }
 
         return attributed
